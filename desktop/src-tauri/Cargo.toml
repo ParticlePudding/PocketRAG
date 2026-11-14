@@ -1,0 +1,24 @@
+[package]
+name = "rag-desktop"
+version = "1.0.0"
+description = "RAG プロンプトビルダー（デスクトップ版）"
+edition = "2021"
+rust-version = "1.80"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[features]
+# cargo build だけで本番用（埋め込み資源を使う）になるようにする
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+cli/runtime/
+cli/site/
+cli/src/core.cjs
+cli/src/site_files.js
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+*.part

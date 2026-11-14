@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG精度テスト</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#5f6b7a; --line:#d9dee5; --accent:#2f6fde;
+    --accent-weak:#e7effd; --ok:#1d7a46; --ok-bg:#e3f4ea; --ng:#b3261e; --ng-bg:#fbe9e7; --warn:#b4540a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#15181d; --card:#1e232a; --text:#e6e9ee; --muted:#9aa5b3; --line:#343b45;
+    --accent:#6a9bf4; --accent-weak:#253247; --ok:#5fcf8f; --ok-bg:#1d3527; --ng:#f2867c; --ng-bg:#3d2220; --warn:#f0a35c; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 "Yu Gothic UI","Meiryo","Hiragino Sans",system-ui,sans-serif; }
+  header { padding:16px 24px 4px; } header h1 { font-size:20px; margin:0; } header p { margin:2px 0 0; color:var(--muted); }
+  main { max-width:1280px; margin:0 auto; padding:8px 24px 40px; display:grid; gap:14px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  h2 { font-size:16px; margin:0 0 8px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .muted { color:var(--muted); font-size:13px; } .warn { color:var(--warn); }
+  button, .btn { font:inherit; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:6px; padding:5px 12px; cursor:pointer; }
+  button:hover, .btn:hover { border-color:var(--accent); } button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  input[type=text], input[type=number], select, textarea { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:4px 8px; }
+  input[type=number] { width:80px; } .hidden-input { display:none; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:6px 18px; }
+  .grid label { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px; }
+  .card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .card .v { font-size:26px; font-weight:700; } .card .l { color:var(--muted); font-size:12px; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { border-bottom:1px solid var(--line); padding:6px 6px; vertical-align:top; text-align:left; }
+  th { font-size:12px; color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--card); }
+  td.q { min-width:200px; } td.retc { min-width:96px; } td.exp { min-width:170px; font-size:13px; color:var(--muted); }
+  td textarea { width:100%; min-width:260px; min-height:64px; font-size:13px; resize:vertical; }
+  .tag { font-size:11px; border:1px solid var(--line); border-radius:4px; padding:0 5px; white-space:nowrap; }
+  .judge { font-weight:700; border-radius:6px; padding:2px 8px; cursor:pointer; white-space:nowrap; user-select:none; display:inline-block; }
+  .judge.ok { color:var(--ok); background:var(--ok-bg); } .judge.ng { color:var(--ng); background:var(--ng-bg); } .judge.none { color:var(--muted); }
+  .judge.manual::after { content:"（手動）"; font-weight:400; font-size:11px; }
+  .ret.ok { color:var(--ok); } .ret.ng { color:var(--ng); }
+  details.chunks summary { cursor:pointer; color:var(--accent); font-size:12px; }
+  details.chunks pre { white-space:pre-wrap; font-size:12px; max-height:240px; overflow:auto; background:var(--bg); padding:6px; border-radius:6px; }
+  .mode-badge { display:inline-block; font-size:11px; font-weight:bold; padding:1px 8px; border-radius:10px; color:#fff; margin-right:4px; } .mode-badge.off { background:#5a6b7d; } .mode-badge.on { background:#2d7d46; }
+  .small { font-size:12px; } .nowrap { white-space:nowrap; }
+  #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#222; color:#fff; padding:8px 16px; border-radius:6px; opacity:0; transition:opacity .2s; pointer-events:none; }
+  #toast.show { opacity:.92; }
+  .tablewrap { max-height:75vh; overflow:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RAG精度テスト</h1>
+  <p>テストセットの質問ごとに「検索で根拠が取れたか」と「回答が正しいか」を採点します。LM Studioに自動で問い合わせるか、社内ChatGPTの回答を貼り付けて採点できます。</p>
+  <p id="modeBar" class="small"></p>
+</header>
+<main>
+  <section>
+    <h2>1. 接続先とテスト条件</h2>
+    <div class="grid">
+      <label>LM StudioのURL <input type="text" id="url" style="width:190px"></label>
+      <label>モデル <span class="row"><select id="model" style="max-width:170px"><option value="">（未取得）</option></select><button id="modelsBtn">取得</button></span></label>
+      <label>方式
+        <select id="mode"><option value="rag">RAG（資料を渡す）</option><option value="none">資料なし（比較用）</option></select></label>
+      <label>検索方式
+        <select id="searchMode"><option value="kw">キーワードのみ</option><option value="hybrid">ハイブリッド（埋め込み）</option></select></label>
+      <label>埋め込みモデル <span class="row"><select id="embModel" style="max-width:220px"><option value="">（未取得）</option></select><button id="webImportBtn" type="button" title="モデルのフォルダ（例：埋め込みモデル\ruri-v3-30m）を選ぶと、このブラウザに取り込みます（オフラインで動きます）">モデルフォルダを追加…</button></span><input type="file" id="webDir" webkitdirectory multiple hidden></label>
+      <label>ブラウザ内の計算 <select id="webDevice"><option value="auto">自動（GPU優先）</option><option value="webgpu">GPU（WebGPU）</option><option value="wasm">CPU</option></select></label>
+      <label>資料の件数（上位k） <input type="number" id="topk" min="1" max="20"></label>
+      <label>チャンクの文字数 <input type="number" id="chunk" min="200" max="4000" step="50"></label>
+      <label>チャンクの重なり <input type="number" id="overlap" min="0" max="1000" step="10"></label>
+      <label>temperature <input type="number" id="temp" min="0" max="2" step="0.1"></label>
+      <label>最大出力トークン <input type="number" id="maxTok" min="64" max="8192" step="64"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="pingBtn">接続テスト</button>
+      <button id="retBtn">検索をやり直す</button>
+      <span id="connInfo" class="muted">LM Studioの「Developer」画面でサーバーを起動し、設定の「Enable CORS」をオンにしてください。</span>
+    </div>
+    <details style="margin-top:10px" id="promptBox">
+      <summary>プロンプト（基本・追加）<span id="promptState" class="muted small"></span></summary>
+      <div style="display:grid;gap:4px;margin-top:6px">
+        <div class="row"><b>基本プロンプト</b><span class="muted small">回答のルール。プロンプトの先頭に入ります</span><button type="button" id="resetBase" style="margin-left:auto">既定に戻す</button></div>
+        <textarea id="promptBase" rows="7" style="width:100%;font-size:13px;resize:vertical"></textarea>
+        <div class="row"><b>追加プロンプト</b><span class="muted small">基本プロンプトの後に足すルール。空にすると何も足しません</span><button type="button" id="resetExtra" style="margin-left:auto">既定に戻す</button></div>
+        <textarea id="promptExtra" rows="3" style="width:100%;font-size:13px;resize:vertical"></textarea>
+        <span class="muted small">プロンプト生成ツール（rag-prompt-builder.html）と共通です（同じブラウザの場合）。変更後は「すべて実行」でやり直してください。</span>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>2. テストセット</h2>
+    <div class="row">
+      <span id="setInfo"></span>
+      <span style="margin-left:auto" class="row">
+        <label class="btn">テストセットを読み込む（JSON）<input type="file" id="setInput" class="hidden-input" accept=".json"></label>
+        <button id="setExportBtn">今のテストセットを書き出す</button>
+      </span>
+    </div>
+    <div id="license" class="muted small" style="margin-top:4px"></div>
+  </section>
+
+  <section>
+    <h2>3. 実行と結果</h2>
+    <div class="row">
+      <button class="primary" id="runBtn">すべて実行（LM Studio）</button>
+      <button id="stopBtn" disabled>停止</button>
+      <button id="clearBtn">回答をクリア</button>
+      <span id="progress" class="muted"></span>
+      <span style="margin-left:auto" class="row">
+        <button id="csvBtn">結果をCSVで保存</button>
+        <button id="jsonBtn">結果をJSONで保存</button>
+      </span>
+    </div>
+    <div class="cards" style="margin-top:10px" id="cards"></div>
+    <div id="byType" style="margin-top:10px"></div>
+    <p class="muted small">判定は採点キーワードの一致による自動判定です。判定ラベルをクリックすると「正解 → 不正解 → 自動」の順に手動で上書きできます。社内ChatGPTで試すときは、各行の「プロンプト」でコピーし、返ってきた回答を回答欄に貼り付けてください。</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>#</th><th>種類</th><th>質問</th><th>想定回答</th><th>検索</th><th>回答</th><th>判定</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script id="core">/*CORE*/</script>
+<script>const DEFAULT_SET = /*TESTSET*/;</script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const toast = m => { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 1800); };
+
+  const DEF = { url: 'http://localhost:1234/v1', model: '', mode: 'rag', topk: 5, chunk: 600, overlap: 100, temp: 0.1, maxTok: 2048, searchMode: 'kw', embModel: '', webDevice: 'auto' };
+  let cfg = { ...DEF };
+  try { Object.assign(cfg, JSON.parse(localStorage.getItem('rageval-cfg') || '{}')); } catch {}
+  const saveCfg = () => { try { localStorage.setItem('rageval-cfg', JSON.stringify(cfg)); } catch {} };
+
+  let set = DEFAULT_SET, flat = [], index = null, state = [], abort = null;
+  const embCache = new Map(); let retNote = '';
+
+  /* ---------- 採点 ---------- */
+  const normA = s => String(s || '').normalize('NFKC').toLowerCase().replace(/(\d),(?=\d)/g, '$1').replace(/\s+/g, '');
+  const REFUSE = ['判断できません', '判断できない', '記載がありません', '記載されていません', '記載はありません', '記述がありません', '記述はありません',
+    '見当たりません', '含まれていません', '書かれていません', 'わかりません', '分かりません', '情報がありません', '情報はありません'];
+  const isRefusal = a => REFUSE.some(r => normA(a).includes(normA(r)));
+  const coverage = (text, must) => {
+    const t = normA(text);
+    return must.filter(g => g.some(x => t.includes(normA(x)))).length;
+  };
+  const stripThink = s => String(s || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/^[\s\S]*?<\/think>/, '').trim();
+
+  function autoJudge(q, answer) {
+    const a = stripThink(answer);
+    if (!a.trim()) return null;
+    if (!q.must.length) return isRefusal(a);
+    return coverage(a, q.must) === q.must.length;
+  }
+
+  /* ---------- 準備 ---------- */
+  // 検索の当たり判定には、本文に加えて文書名・見出しも含める（表のチャンクは本文に主語がないため）
+  const ctxText = cs => cs.map(c => c.source.replace(/\.[^.]+$/, '') + ' ' + (c.heading || '') + '\n' + c.text).join('\n');
+  const retOf = (q, cs) => q.must.length ? coverage(ctxText(cs), q.must) / q.must.length : null;
+
+  async function embedCached(texts) {
+    const key = t => cfg.embModel + '|' + t;
+    const missing = [...new Set(texts.filter(t => !embCache.has(key(t))))];
+    if (missing.length) {
+      const onProgress = (d, t) => { $('progress').textContent = `ベクトル化中… ${d} / ${t}`; };
+      const out = cfg.embModel.startsWith('app:')
+        ? await Core.embed(window.RAG_APP.embedUrl, cfg.embModel.slice(4), missing, { onProgress })
+        : cfg.embModel.startsWith('web:')
+        ? await BrowserEmbed.embed(cfg.embModel.slice(4), missing, { device: cfg.webDevice, onProgress,
+            onDownload: (f, d, t) => { $('progress').textContent = `モデルをダウンロード中（初回のみ）… ${f.split('/').pop()} ${(d / 1048576).toFixed(0)} / ${(t / 1048576).toFixed(0)} MB`; } })
+        : await Core.embed(base(), cfg.embModel, missing, { onProgress });
+      missing.forEach((t, n) => embCache.set(key(t), out[n]));
+    }
+    return texts.map(t => embCache.get(key(t)));
+  }
+
+  async function prepare() {
+    flat = [];
+    for (const d of set.docs) for (const c of Core.chunkText(d.text, cfg.chunk, cfg.overlap)) flat.push({ source: d.name, heading: c.heading, text: c.text });
+    index = Core.buildIndex(flat);
+    const old = new Map(state.map(s => [s.q.id, s]));
+    // まずキーワード検索だけで結果を作る（ハイブリッドの比較対象にもなる）
+    state = set.questions.map(q => {
+      const prev = old.get(q.id);
+      const kwChunks = Core.search(index, q.question, '', cfg.topk).map(h => flat[h.i]);
+      return { q, chunks: kwChunks, kwRet: retOf(q, kwChunks), ret: retOf(q, kwChunks), ranks: null,
+        answer: prev ? prev.answer : '', manual: prev ? prev.manual : null, ms: prev ? prev.ms : null, err: prev ? prev.err : '' };
+    });
+    retNote = '';
+    $('setInfo').textContent = `${set.title || 'テストセット'}：資料 ${set.docs.length} 件（チャンク ${flat.length} 個）・質問 ${set.questions.length} 問`;
+    $('license').textContent = set.license || '';
+    if (cfg.searchMode === 'hybrid') {
+      render();
+      try {
+        if (!cfg.embModel) throw new Error('埋め込みモデルが選ばれていません（「モデルフォルダを追加…」でブラウザ内モデルを取り込むか、「接続テスト」でLM Studioの一覧を取得してください）');
+        const pre = Core.embedPrefixes(cfg.embModel);
+        const vecs = await embedCached(flat.map(c => pre.d + Core.chunkEmbedText(c)));
+        const qvecs = await embedCached(state.map(s => pre.q + s.q.question));
+        state.forEach((s, k) => {
+          const hits = Core.hybridSearch(index, s.q.question, '', cfg.topk, qvecs[k], vecs);
+          s.chunks = hits.map(h => flat[h.i]); s.ranks = hits; s.ret = retOf(s.q, s.chunks);
+        });
+        $('progress').textContent = 'ハイブリッド検索の準備ができました';
+      } catch (err) {
+        retNote = 'ハイブリッド検索に失敗したため、キーワード検索の結果を使っています：' + err.message;
+        $('progress').textContent = '';
+      }
+    }
+    render();
+  }
+
+
+  /* ---- オンライン／オフラインの表示 ---- */
+  (() => {
+    const off = BrowserEmbed.offline, el = document.getElementById('modeBar');
+    const link = BrowserEmbed.canGoOnline ? ` <a href="${BrowserEmbed.switchUrl(!off)}">${off ? 'オンラインに切り替え' : 'オフラインに切り替え'}</a>` : '';
+    if (window.RAG_APP) { el.innerHTML = `<span class="mode-badge off">アプリ版</span> 外部とは通信しません。ベクトル化はこのPCの${window.RAG_APP.engine === 'native' ? 'ネイティブエンジン（高速）' : 'エンジン'}で行います。`; return; }
+    el.innerHTML = off
+      ? `<span class="mode-badge off">オフライン</span> 外部とは一切通信しません。埋め込みモデルは「モデルフォルダを追加…」で取り込みます。${link}`
+      : `<span class="mode-badge on">オンライン</span> 埋め込みモデルを HuggingFace から取得できます（初回のみ。資料はこのPCの外に出ません）。${link}`;
+  })();
+
+  /* ---------- プロンプト（基本・追加） ---------- */
+  let promptRules = Core.loadPromptRules();
+  const rulesState = () => {
+    const b = promptRules.base.trim() === Core.DEFAULT_BASE.trim(), e = promptRules.extra.trim() === Core.DEFAULT_EXTRA.trim();
+    return { base: b ? '既定' : '変更あり', extra: !promptRules.extra.trim() ? 'なし' : e ? '既定' : '変更あり' };
+  };
+  function showRules() {
+    $('promptBase').value = promptRules.base; $('promptExtra').value = promptRules.extra;
+    const st = rulesState(); $('promptState').textContent = `　基本：${st.base}／追加：${st.extra}`;
+  }
+  showRules();
+  for (const [id, key] of [['promptBase', 'base'], ['promptExtra', 'extra']]) {
+    $(id).addEventListener('input', () => { promptRules[key] = $(id).value; Core.savePromptRules(promptRules); const st = rulesState(); $('promptState').textContent = `　基本：${st.base}／追加：${st.extra}`; });
+  }
+  $('resetBase').addEventListener('click', () => { promptRules.base = Core.DEFAULT_BASE; Core.savePromptRules(promptRules); showRules(); toast('基本プロンプトを既定に戻しました'); });
+  $('resetExtra').addEventListener('click', () => { promptRules.extra = Core.DEFAULT_EXTRA; Core.savePromptRules(promptRules); showRules(); toast('追加プロンプトを既定に戻しました'); });
+  window.addEventListener('storage', e => { if (e.key === 'rag-prompt-rules') { promptRules = Core.loadPromptRules(); showRules(); } });
+
+  function promptFor(s) {
+    if (cfg.mode === 'none') {
+      return { system: '質問に日本語で簡潔に答えてください。確かな知識がない場合は「判断できません」と答えてください。', user: s.q.question };
+    }
+    const p = Core.buildPrompt({ question: s.q.question, chunks: s.chunks, format: 'qa', base: promptRules.base, extra: promptRules.extra });
+    return { system: p.system, user: p.user, full: p.full };
+  }
+
+  /* ---------- 表示 ---------- */
+  const judgeOf = s => s.manual !== null ? s.manual : autoJudge(s.q, s.answer);
+  function render() {
+    $('rows').innerHTML = state.map((s, k) => {
+      const j = judgeOf(s);
+      const retCell = s.ret === null ? '<span class="muted small">対象外</span>'
+        : `<span class="ret ${s.ret === 1 ? 'ok' : 'ng'}">${s.ret === 1 ? '✓ 根拠あり' : s.ret > 0 ? '△ 一部' : '✗ 根拠なし'}</span>`;
+      return `<tr data-k="${k}">
+        <td class="nowrap">${s.q.id}</td>
+        <td><span class="tag">${esc(s.q.type)}</span></td>
+        <td class="q">${esc(s.q.question)}</td>
+        <td class="exp">${esc(s.q.expected)}</td>
+        <td class="small retc">${retCell}
+          ${cfg.searchMode === 'hybrid' && s.kwRet !== null && s.kwRet !== s.ret ? `<div class="muted small">キーワードのみ：${s.kwRet === 1 ? '✓' : s.kwRet > 0 ? '△' : '✗'}</div>` : ''}
+          <details class="chunks"><summary>上位${s.chunks.length}件</summary><pre>${s.chunks.map((c, i) => {
+            const r = s.ranks && s.ranks[i]; const rk = r ? `（キーワード${r.kwRank ? r.kwRank + '位' : '圏外'}・意味${r.vecRank ? r.vecRank + '位' : '—'}）` : '';
+            return `[${i + 1}] ${esc(c.source)}${c.heading ? '／' + esc(c.heading) : ''}${rk}\n${esc(c.text.slice(0, 220))}…`; }).join('\n\n')}</pre></details></td>
+        <td><textarea data-k="${k}" placeholder="回答（自動で入るか、貼り付け）">${esc(s.answer)}</textarea>
+          <div class="muted small">${s.err ? '<span class="warn">' + esc(s.err) + '</span>' : s.ms ? (s.ms / 1000).toFixed(1) + ' 秒' : ''}</div></td>
+        <td><span class="judge ${j === null ? 'none' : j ? 'ok' : 'ng'}${s.manual !== null ? ' manual' : ''}" data-j="${k}">${j === null ? '—' : j ? '正解' : '不正解'}</span></td>
+        <td class="nowrap"><button class="small" data-copy="${k}">プロンプト</button><br><button class="small" data-run="${k}" style="margin-top:4px">実行</button></td>
+      </tr>`;
+    }).join('');
+    renderSummary();
+  }
+
+  function renderSummary() {
+    const ans = state.filter(s => s.q.must.length);
+    const retOk = ans.filter(s => s.ret === 1).length;
+    const kwOk = ans.filter(s => s.kwRet === 1).length;
+    const hybrid = cfg.searchMode === 'hybrid' && state.some(s => s.ranks);
+    const judged = state.filter(s => judgeOf(s) !== null);
+    const correct = judged.filter(s => judgeOf(s)).length;
+    const un = state.filter(s => !s.q.must.length && judgeOf(s) !== null);
+    const unOk = un.filter(s => judgeOf(s)).length;
+    const answerable = judged.filter(s => s.q.must.length);
+    const cited = answerable.filter(s => /\[\d+\]/.test(s.answer)).length;
+    const times = state.filter(s => s.ms).map(s => s.ms);
+    const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
+    const card = (v, l, sub) => `<div class="card"><div class="v">${v}</div><div class="l">${l}</div>${sub ? `<div class="muted small">${sub}</div>` : ''}</div>`;
+    $('cards').innerHTML =
+      card(pct(retOk, ans.length), `検索で根拠が上位${cfg.topk}件に入った割合（${hybrid ? 'ハイブリッド' : 'キーワード'}）`,
+        `${retOk} / ${ans.length} 問` + (hybrid ? `<br>キーワードのみなら ${kwOk} / ${ans.length} 問` : '')) +
+      card(pct(correct, judged.length), '回答の正解率', `${correct} / ${judged.length} 問（回答済みのみ）`) +
+      card(pct(unOk, un.length), '資料にない質問で「判断できません」と答えた割合', `${unOk} / ${un.length} 問`) +
+      (cfg.mode === 'rag' ? card(pct(cited, answerable.length), '根拠番号 [n] を付けた割合', `${cited} / ${answerable.length} 問`) : '') +
+      card(times.length ? (times.reduce((a, b) => a + b, 0) / times.length / 1000).toFixed(1) + ' 秒' : '—', '1問あたりの平均応答時間', cfg.model ? esc(cfg.model) : '');
+    const types = [...new Set(state.map(s => s.q.type))];
+    $('byType').innerHTML = (retNote ? `<p class="warn small">${esc(retNote)}</p>` : '') + '<table><thead><tr><th>種類</th><th>問題数</th><th>検索で根拠あり</th><th>回答の正解</th></tr></thead><tbody>' +
+      types.map(t => {
+        const g = state.filter(s => s.q.type === t), ga = g.filter(s => s.q.must.length), gj = g.filter(s => judgeOf(s) !== null);
+        return `<tr><td>${esc(t)}</td><td>${g.length}</td><td>${ga.length ? ga.filter(s => s.ret === 1).length + ' / ' + ga.length : '—'}</td><td>${gj.length ? gj.filter(s => judgeOf(s)).length + ' / ' + gj.length : '未回答'}</td></tr>`;
+      }).join('') + '</tbody></table>';
+  }
+
+  $('rows').addEventListener('input', e => {
+    const k = e.target.dataset.k; if (k === undefined) return;
+    state[k].answer = e.target.value; state[k].ms = null; state[k].err = '';
+    const tr = e.target.closest('tr'); const s = state[k]; const j = judgeOf(s);
+    const el = tr.querySelector('.judge'); el.className = `judge ${j === null ? 'none' : j ? 'ok' : 'ng'}${s.manual !== null ? ' manual' : ''}`; el.textContent = j === null ? '—' : j ? '正解' : '不正解';
+    renderSummary();
+  });
+  $('rows').addEventListener('click', async e => {
+    const t = e.target;
+    if (t.dataset.j !== undefined) {
+      const s = state[t.dataset.j];
+      s.manual = s.manual === null ? true : s.manual === true ? false : null;
+      render();
+    } else if (t.dataset.copy !== undefined) {
+      const p = promptFor(state[t.dataset.copy]);
+      copyText(p.full || (p.system + '\n\n' + p.user));
+    } else if (t.dataset.run !== undefined) {
+      abort = new AbortController(); setRunning(true);
+      await runOne(+t.dataset.run); setRunning(false); render();
+    }
+  });
+
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); }
+    catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+    toast('コピーしました');
+  }
+
+  /* ---------- LM Studio ---------- */
+  const base = () => cfg.url.replace(/\/+$/, '');
+  async function listModels() {
+    const r = await fetch(base() + '/models');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    return (j.data || []).map(m => m.id);
+  }
+  async function refreshModels() {
+    try {
+      const all = await listModels();
+      const ids = all.filter(id => !Core.isEmbedModel(id)), embs = all.filter(Core.isEmbedModel);
+      $('model').innerHTML = ids.map(id => `<option${id === cfg.model ? ' selected' : ''}>${esc(id)}</option>`).join('') || '<option value="">（モデルが読み込まれていません）</option>';
+      if (!ids.includes(cfg.model)) { cfg.model = ids[0] || ''; saveCfg(); }
+      lmEmbs = embs; renderEmbModels();
+      $('connInfo').innerHTML = `<span style="color:var(--ok)">接続できました（回答用 ${ids.length} 個・埋め込み用 ${embs.length} 個）</span>`;
+    } catch (err) {
+      $('connInfo').innerHTML = `<span class="warn">接続できません（${esc(err.message)}）。LM Studioのサーバーが起動しているか、「Enable CORS」がオンかを確認してください。</span>`;
+    }
+  }
+  /* 埋め込みモデルの一覧（ブラウザ内に取り込んだもの＋LM Studio） */
+  let lmEmbs = [], appEmbs = null;
+  async function renderEmbModels() {
+    await BrowserEmbed.load().catch(() => {});
+    if (window.RAG_APP && appEmbs === null) {
+      try { appEmbs = ((await (await fetch(window.RAG_APP.embedUrl + '/models')).json()).data || []).map(m => 'app:' + m.id); } catch { appEmbs = []; }
+    }
+    const app = appEmbs || [];
+    const wm = BrowserEmbed.info().models, web = wm.map(m => 'web:' + m.name);
+    const tag = id => { const m = wm.find(x => 'web:' + x.name === id); return m && m.online ? (m.cached ? ' — オンライン・取得済み' : ` — オンライン（初回 ${m.size}）`) : ''; };
+    const opt = id => `<option value="${esc(id)}"${id === cfg.embModel ? ' selected' : ''}>${esc(id.startsWith('web:') ? BrowserEmbed.label(id.slice(4)) + tag(id) : id.startsWith('app:') ? BrowserEmbed.label(id.slice(4)) : id)}</option>`;
+    $('embModel').innerHTML = (app.length ? `<optgroup label="このアプリ（ネイティブ・高速）">${app.map(opt).join('')}</optgroup>` : '')
+      + (web.length ? `<optgroup label="ブラウザ内">${web.map(opt).join('')}</optgroup>` : '')
+      + (lmEmbs.length ? `<optgroup label="LM Studio">${lmEmbs.map(opt).join('')}</optgroup>` : '')
+      || '<option value="">（「モデルフォルダを追加…」で取り込んでください）</option>';
+    const all = [...app, ...web, ...lmEmbs];
+    if (!all.includes(cfg.embModel)) { cfg.embModel = app.find(id => /ruri/i.test(id)) || web.find(id => /ruri/i.test(id)) || all[0] || ''; saveCfg(); $('embModel').value = cfg.embModel; }
+  }
+  $('webImportBtn').addEventListener('click', () => $('webDir').click());
+  $('webDir').addEventListener('change', async e => {
+    const fl = e.target.files; if (!fl || !fl.length) return;
+    try {
+      const r = await BrowserEmbed.importFiles(fl, (d, t) => { $('progress').textContent = `モデルを取り込み中… ${(d / 1048576).toFixed(0)} / ${(t / 1048576).toFixed(0)} MB`; });
+      $('progress').textContent = '';
+      await renderEmbModels();
+      toast('取り込みました：' + r.models.join('、'));
+      if (cfg.searchMode === 'hybrid') prepare();
+    } catch (err) { $('progress').innerHTML = `<span class="warn">${esc(err.message)}</span>`; }
+    finally { e.target.value = ''; }
+  });
+  $('modelsBtn').addEventListener('click', refreshModels);
+  $('pingBtn').addEventListener('click', refreshModels);
+
+  async function runOne(k) {
+    const s = state[k];
+    if (!cfg.model) { s.err = 'モデルが選ばれていません'; return; }
+    const p = promptFor(s);
+    const t0 = performance.now();
+    try {
+      const r = await fetch(base() + '/chat/completions', {
+        method: 'POST', signal: abort.signal, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: cfg.model, temperature: +cfg.temp, max_tokens: +cfg.maxTok, stream: false,
+          messages: [{ role: 'system', content: p.system }, { role: 'user', content: p.user }] })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0, 120));
+      const j = await r.json();
+      s.answer = stripThink(j.choices?.[0]?.message?.content || '');
+      s.ms = performance.now() - t0; s.err = s.answer ? '' : '空の回答でした'; s.manual = null;
+    } catch (err) {
+      s.err = err.name === 'AbortError' ? '停止しました' : err.message; s.ms = null;
+    }
+  }
+  function setRunning(on) { $('runBtn').disabled = on; $('stopBtn').disabled = !on; }
+  $('runBtn').addEventListener('click', async () => {
+    if (!cfg.model) { await refreshModels(); if (!cfg.model) return toast('モデルを選んでください'); }
+    abort = new AbortController(); setRunning(true);
+    const started = Date.now();
+    for (let k = 0; k < state.length; k++) {
+      if (abort.signal.aborted) break;
+      $('progress').textContent = `実行中 ${k + 1} / ${state.length}`;
+      await runOne(k); render();
+    }
+    $('progress').textContent = abort.signal.aborted ? '停止しました' : `完了（${Math.round((Date.now() - started) / 1000)} 秒）`;
+    setRunning(false);
+  });
+  $('stopBtn').addEventListener('click', () => abort && abort.abort());
+  $('clearBtn').addEventListener('click', () => { if (!confirm('回答と手動判定をすべて消しますか？')) return; state.forEach(s => { s.answer = ''; s.manual = null; s.ms = null; s.err = ''; }); render(); });
+
+  /* ---------- 設定 ---------- */
+  const bind = (id, key, num, after) => {
+    const el = $(id); el.value = cfg[key];
+    el.addEventListener('change', () => { cfg[key] = num ? +el.value : el.value; saveCfg(); after && after(); });
+  };
+  bind('url', 'url', false, refreshModels);
+  bind('model', 'model', false, renderSummary);
+  bind('mode', 'mode', false, renderSummary);
+  bind('searchMode', 'searchMode', false, async () => { if (cfg.searchMode === 'hybrid' && !cfg.embModel) await refreshModels(); prepare(); });
+  bind('embModel', 'embModel', false, () => cfg.searchMode === 'hybrid' && prepare());
+  if (cfg.embModel) $('embModel').innerHTML = `<option selected>${esc(cfg.embModel)}</option>`;
+  bind('webDevice', 'webDevice', false);
+  $('retBtn').addEventListener('click', () => prepare());
+  bind('topk', 'topk', true, prepare);
+  bind('chunk', 'chunk', true, prepare);
+  bind('overlap', 'overlap', true, prepare);
+  bind('temp', 'temp', true);
+  bind('maxTok', 'maxTok', true);
+  if (cfg.model) $('model').innerHTML = `<option selected>${esc(cfg.model)}</option>`;
+
+  /* ---------- 入出力 ---------- */
+  function download(name, text, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: type + ';charset=utf-8' })); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const resultRows = () => state.map(s => ({
+    id: s.q.id, type: s.q.type, question: s.q.question, expected: s.q.expected,
+    retrieval: s.ret === null ? '' : s.ret === 1 ? 'OK' : s.ret > 0 ? 'PARTIAL' : 'NG',
+    retrieval_kw: s.kwRet === null ? '' : s.kwRet === 1 ? 'OK' : s.kwRet > 0 ? 'PARTIAL' : 'NG',
+    sources: s.chunks.map(c => c.source).join(' / '), answer: s.answer,
+    judge: judgeOf(s) === null ? '' : judgeOf(s) ? '正解' : '不正解', manual: s.manual !== null ? '手動' : '', seconds: s.ms ? (s.ms / 1000).toFixed(2) : ''
+  }));
+  $('csvBtn').addEventListener('click', () => {
+    const rows = resultRows(); const head = Object.keys(rows[0]);
+    const q = v => '"' + String(v).replace(/"/g, '""') + '"';
+    const csv = '﻿' + [`# model=${cfg.model} mode=${cfg.mode} search=${cfg.searchMode}${cfg.searchMode === 'hybrid' ? ' emb=' + cfg.embModel + (cfg.embModel.startsWith('web:') && BrowserEmbed.lastRun ? ' (' + BrowserEmbed.lastRun + ')' : '') : ''} topk=${cfg.topk} chunk=${cfg.chunk} overlap=${cfg.overlap} temp=${cfg.temp} maxTok=${cfg.maxTok} prompt_base=${rulesState().base} prompt_extra=${rulesState().extra}`,
+      ...(cfg.mode === 'rag' ? [`# 基本プロンプト: ${promptRules.base.trim().replace(/\r?\n/g, ' / ')}`, `# 追加プロンプト: ${promptRules.extra.trim().replace(/\r?\n/g, ' / ') || '（なし）'}`] : []),
+      head.join(','), ...rows.map(r => head.map(h => q(r[h])).join(','))].join('\r\n');
+    download(`rag-eval_${stamp()}.csv`, csv, 'text/csv');
+  });
+  $('jsonBtn').addEventListener('click', () => download(`rag-eval_${stamp()}.json`, JSON.stringify({ config: cfg, results: resultRows() }, null, 1), 'application/json'));
+  $('setExportBtn').addEventListener('click', () => download('testset.json', JSON.stringify(set, null, 1), 'application/json'));
+  $('setInput').addEventListener('change', async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try {
+      const d = JSON.parse(await f.text());
+      if (!Array.isArray(d.docs) || !Array.isArray(d.questions)) throw new Error();
+      d.questions.forEach((q, i) => { q.id ??= i + 1; q.type ??= '未分類'; q.must ??= []; q.sources ??= []; q.expected ??= ''; });
+      set = d; state = []; prepare(); toast('テストセットを読み込みました');
+    } catch { toast('テストセットの形式が正しくありません'); }
+  });
+
+  renderEmbModels().finally(prepare);
+  if (cfg.model) refreshModels();
+})();
+</script>
+</body>
+</html>

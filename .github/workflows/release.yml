@@ -1,0 +1,55 @@
+# Windows 向けの配布物（オフライン版・CLI・デスクトップ版）を作る
+#   ・手動実行（Actions → Release → Run workflow）… 成果物は実行結果の Artifacts からダウンロード
+#   ・v で始まるタグを push … GitHub Releases にも添付する（例: git tag v1.0.0 && git push --tags）
+name: Release
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - run: npm ci
+      - name: オフライン版と CLI
+        run: python scripts/build.py offline cli-windows
+      - name: CLI の動作確認
+        shell: pwsh
+        run: |
+          $rag = "dist/cli-windows/RAG-CLI/rag.exe"
+          & $rag models
+          & $rag index src/sample --no-embed -o dist/test-index.json
+          & $rag prompt "琵琶湖の面積は？" -i dist/test-index.json -k 2 -q -o dist/test-prompt.txt
+          if (-not (Select-String -Path dist/test-prompt.txt -Pattern "参考資料" -Quiet)) { throw "prompt failed" }
+      - name: デスクトップ版（Tauri）
+        working-directory: desktop/src-tauri
+        run: cargo build --release --locked
+      - run: python scripts/build.py desktop --app desktop/src-tauri/target/release/rag-desktop.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rag-prompt-builder-windows
+          path: |
+            dist/RAG精度テスト.zip
+            dist/RAG-CLI-windows.zip
+            dist/RAG-Desktop.zip
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/RAG精度テスト.zip
+            dist/RAG-CLI-windows.zip
+            dist/RAG-Desktop.zip

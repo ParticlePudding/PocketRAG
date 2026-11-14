@@ -1,0 +1,6 @@
+﻿{
+  "index": "rag-index.json",
+  "k": 5,
+  "model": "ruri-v3-30m",
+  "llm": "http://localhost:1234/v1"
+}

@@ -1,0 +1,12 @@
+{
+  "name": "rag-prompt-builder",
+  "private": true,
+  "version": "1.0.0",
+  "description": "社内ChatGPT向けのRAGプロンプトをローカルで作るツール（ブラウザ版・CLI・デスクトップ版）",
+  "scripts": {
+    "build": "python scripts/build.py site offline"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.2"
+  }
+}

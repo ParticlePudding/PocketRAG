@@ -1,0 +1,31 @@
+﻿埋め込みモデル（ブラウザ内ベクトル化用）
+
+■ 準備（インターネットにつながるPCで1回だけ）
+1. 「モデルをダウンロード.bat」をダブルクリック
+   → このフォルダの中に ruri-v3-30m と bge-m3 のフォルダができます（合計 約0.6〜0.7GB）
+   ・軽量版だけでよいとき：PowerShellで  .\download_models.ps1 -Model ruri
+   ・GPUで速く動かしたいとき：           .\download_models.ps1 -Gpu   （bge-m3 の fp16 版 約1.1GB を追加）
+2. できたモデルのフォルダを社内PCにコピー（置き場所はどこでも構いません）
+
+■ ツールへの登録（社内PCで、モデルごとに1回だけ）
+rag-prompt-builder.html の「設定」、または rag-eval.html の「埋め込みモデル」の横にある
+「モデルフォルダを追加…」を押し、モデルのフォルダ（例：ruri-v3-30m）を選びます。
+・bge-m3 も使うときは、もう一度「モデルフォルダを追加…」で bge-m3 フォルダを選びます
+・この「埋め込みモデル」フォルダを選べば、中のモデルをまとめて登録できます
+・登録したモデルはブラウザに保存されるので、次回からは選び直し不要です
+  （同じブラウザなら、2つのツールで共通です）
+・計算エンジンはHTMLに内蔵しているので、モデル以外に用意するものはありません
+
+■ モデルのフォルダの中身
+ruri-v3-30m/
+  config.json, tokenizer.json, tokenizer_config.json, onnx/model_quantized.onnx など
+
+■ 手作業でダウンロードする場合
+次のページの「Files and versions」から上と同じファイルを取り、同じ構成で置いてください。
+  https://huggingface.co/sirasagi62/ruri-v3-30m-ONNX
+  https://huggingface.co/Xenova/bge-m3
+ほかの Transformers.js 対応モデル（onnx フォルダがあるもの）も、同じ形で置けば使えます。
+
+■ ライセンス
+ruri-v3-30m / bge-m3 … 各モデルのページを参照（Apache-2.0 / MIT）
+HTMLに内蔵の計算エンジン … Transformers.js（Apache-2.0）、ONNX Runtime Web（MIT）
