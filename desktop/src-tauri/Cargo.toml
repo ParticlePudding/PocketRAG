@@ -11,6 +11,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 
+# アプリが強制終了されても rag.exe を道連れにする（Windows のジョブオブジェクト）。Tauri が既に使っている版
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
 [features]
 # cargo build だけで本番用（埋め込み資源を使う）になるようにする
 default = ["custom-protocol"]

@@ -23,6 +23,39 @@ fn exe_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// rag.exe を「ジョブオブジェクト」に入れ、このアプリの終わり方に関係なく一緒に終了させる。
+/// 普通に閉じたときは RunEvent::Exit で止めるが、タスクマネージャーでの強制終了やクラッシュでは
+/// そこを通らないため、rag.exe が残ってしまう。ジョブのハンドルはわざと閉じずに持ち続け、
+/// このアプリが終わって OS がハンドルを閉じた時点で、ジョブ内の rag.exe が終了する（KILL_ON_JOB_CLOSE）。
+#[cfg(windows)]
+fn tie_to_app_lifetime(child: &Child) {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 || AssignProcessToJobObject(job, child.as_raw_handle() as _) == 0 {
+            // 失敗しても起動は続ける（普通に閉じたときは RunEvent::Exit で止まる）
+            CloseHandle(job);
+        }
+        // 成功時は job を閉じない（アプリ終了時に OS が閉じる）
+    }
+}
+
 /// rag.exe を起動して、画面の URL（1行目の出力）を受け取る
 fn start_backend() -> Result<(Child, String), String> {
     let dir = exe_dir();
@@ -39,6 +72,8 @@ fn start_backend() -> Result<(Child, String), String> {
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW：黒い画面を出さない
     let mut child = cmd.spawn().map_err(|e| format!("rag.exe を起動できません: {e}"))?;
+    #[cfg(windows)]
+    tie_to_app_lifetime(&child);
     let stdout = child.stdout.take().ok_or("rag.exe の出力を受け取れません")?;
     let (tx, rx) = mpsc::channel::<String>();
     std::thread::spawn(move || {

@@ -69,12 +69,16 @@ Windows で Python を使うときは `PYTHONUTF8=1` を付ける（日本語の
 - 利用者の実機（Windows、Chrome）で確認済み：オフライン版のブラウザ内ベクトル化（bge-m3・ruri とも WebGPU）と精度テスト。
   - gemma-4-e2b＋ハイブリッド：**ruri-v3-30m で 34/34 正解**、bge-m3 で 32 正解・1 部分正解（Q30）・1 不正解（Q28）。日本語資料では ruri を標準にする方針。
 - 速度（2コア環境・51チャンク）：ネイティブ版は WASM 版より ruri 相当で約3〜6倍、bge-m3 相当で約7〜13倍速い（スレッド1〜2本）。
-- **未確認**：Windows での rag.exe の実行、Tauri のコンパイル（作業環境では Windows 向け Rust をビルドできなかった。使っている Tauri 2.12.5 の API の存在と引数の形はソースで確認済み）、DirectML、本物のモデルでの CLI。
+- **Windows 11 実機で確認済み（2026-11-16、Node 26 / Bun 1.4.4 / Rust 1.99）**：
+  - `build.py site offline cli-windows desktop` と Tauri の `cargo build --release --locked` が通る。
+  - rag.exe：ネイティブ版エンジンの読み込み、本物の ruri-v3-30m で index（51チャンク：CPU 0.9 秒／DirectML 2.2 秒）・search・prompt・eval（根拠が上位5件に 30/30）。
+  - デスクトップ版：起動（rag.exe は 127.0.0.1 のみで待ち受け）、通常終了・強制終了のどちらでも rag.exe が残らない（ジョブオブジェクトで道連れにする。`tie_to_app_lifetime`）。
+- **未確認**：本物のモデルでの CLI とブラウザ版のベクトル一致、bge-m3 での CLI。
 
 ## 次にやること
 1. GitHub にリポジトリを作って push。Settings → Pages を「GitHub Actions」にする（pages.yml が公開）。
-2. Actions の「Release」を手動実行し、Windows 上で CLI の動作確認とデスクトップ版のビルドが通るか確認。Rust のエラーが出たら直す。
-3. Windows 実機で `rag.exe models / index / app` と、デスクトップ版の起動・終了（rag.exe が残らないか）を確認。
+2. Actions の「Release」を手動実行し、GitHub の Windows 環境でも同じくビルドが通るか確認（ローカルの Windows では通っている）。
+3. （済）Windows 実機で `rag.exe models / index / app` と、デスクトップ版の起動・終了を確認。
 4. 本物のモデルで、CLI（ネイティブ版）とブラウザ版のベクトルがほぼ一致し、検索結果が同じになるか確認（ダミーでは差が最大 0.0003）。
 5. 自動判定の改善：要点の語が含まれていても、答えが「判断できません」なら不正解にする（Q28 の誤判定。精度テスト画面と CLI の両方）。
 6. 利用者の宿題：新しい版（追加プロンプトあり）で ruri と bge-m3 をもう一度評価し、CSV を比較。
