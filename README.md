@@ -1,4 +1,4 @@
-# RAG プロンプトビルダー
+# PocketRAG（RAG プロンプトビルダー）
 
 社内ChatGPT（APIなし）などに貼り付ける **RAG プロンプト** を、手元の資料から作るツールです。
 資料の読み込み・検索（キーワード＋意味のハイブリッド）・ベクトル化はすべてローカルで行い、資料は外部に送信しません。
@@ -26,4 +26,5 @@ python scripts/build.py cli-windows         # CLI（Bun が必要）
 - `desktop/src-tauri/` … デスクトップ版（`rag serve` を起動してウィンドウで開く）
 
 ## ライセンス
+このツールのソースコードは MIT License です（`LICENSE` を参照）。
 テスト用資料は Wikipedia 日本語版の抜粋（CC BY-SA 4.0）。同梱する Transformers.js は Apache-2.0、ONNX Runtime は MIT。
