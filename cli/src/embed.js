@@ -118,6 +118,26 @@ async function getLib() {
   lib = L; return L;
 }
 
+// ベクトル化の関数を用意する。普通のモデルは feature-extraction パイプライン。
+// EmbeddingGemma 2 はパイプラインだと画像・音声の部品まで読み込むので、文章用の部品だけを読み込み、
+// モデルが出す sentence_embedding（平均＋512→768 の変換済み）を使う。呼び方はパイプラインと同じにそろえる。
+// （src/browser_embed.js にも同じ処理がある）
+async function loadExtractor(L, id, opts) {
+  let cfg = null;
+  try { cfg = await L.AutoConfig.from_pretrained(id); } catch {}
+  if (!cfg || !(cfg.architectures || []).includes('EmbeddingGemma2Model')) return L.pipeline('feature-extraction', id, opts);
+  cfg.vision_config = cfg.audio_config = null;
+  const tok = await L.AutoTokenizer.from_pretrained(id);
+  const model = await L.AutoModel.from_pretrained(id, { ...opts, config: cfg });
+  return async texts => (await model(await tok(texts, { padding: true, truncation: true, max_length: 2048 }))).sentence_embedding;
+}
+// 長さ1にそろえる（モデルを直接呼んだときにもパイプラインと同じ扱いにするため）
+function unit(v) {
+  let s = 0; for (let i = 0; i < v.length; i++) s += v[i] * v[i];
+  s = Math.sqrt(s); if (s > 0 && Math.abs(s - 1) > 1e-4) for (let i = 0; i < v.length; i++) v[i] /= s;
+  return v;
+}
+
 const pipes = new Map();
 let runOpts = { device: 'auto', threads: 0 };
 export function setRunOptions(o) { runOpts = { ...runOpts, ...o }; }
@@ -137,7 +157,7 @@ async function getPipe(m) {
       const opts = { device, dtype };
       if (device !== 'wasm' && runOpts.threads > 0) opts.session_options = { intraOpNumThreads: runOpts.threads };
       if (fs.existsSync(path.join(m.dir, 'onnx', `model${suf}.onnx_data`))) opts.use_external_data_format = true;
-      const pipe = await L.pipeline('feature-extraction', 'local/' + id, opts);
+      const pipe = await loadExtractor(L, 'local/' + id, opts);
       const P = { pipe, dtype, device, pooling: poolingOf(m) };
       pipes.set(m.dir, P); return P;
     } catch (e) { lastErr = e; }
@@ -154,7 +174,7 @@ export async function embed(m, texts, { batch = 8, onProgress } = {}) {
     const idx = order.slice(s, s + batch);
     const t = await P.pipe(idx.map(i => texts[i]), { pooling: P.pooling, normalize: true });
     const d = t.dims[t.dims.length - 1];
-    idx.forEach((i, n) => { out[i] = Float32Array.from(t.data.subarray(n * d, (n + 1) * d)); });
+    idx.forEach((i, n) => { out[i] = unit(Float32Array.from(t.data.subarray(n * d, (n + 1) * d))); });
     if (t.dispose) t.dispose();
     onProgress && onProgress(Math.min(s + batch, texts.length), texts.length);
   }

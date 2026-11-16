@@ -12,10 +12,22 @@ import base64, gzip, json, os, re, shutil, subprocess, sys, zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC, DIST, CLI = os.path.join(ROOT, 'src'), os.path.join(ROOT, 'dist'), os.path.join(ROOT, 'cli')
 NM = os.path.join(ROOT, 'node_modules')
+CMAPS = os.path.join(ROOT, 'dist', '_gen', 'cmaps.json')   # pdf.js の CMap を1ファイルにまとめたもの（make_cmaps で作る）
+# 並びは src/browser_embed.js の RUNTIME と同じにする（HTML 内蔵の rt0, rt1, … に対応）
 RT_FILES = [os.path.join(NM, '@huggingface', 'transformers', 'dist', 'transformers.min.js'),
             os.path.join(NM, 'onnxruntime-web', 'dist', 'ort-wasm-simd-threaded.asyncify.mjs'),
-            os.path.join(NM, 'onnxruntime-web', 'dist', 'ort-wasm-simd-threaded.asyncify.wasm')]
+            os.path.join(NM, 'onnxruntime-web', 'dist', 'ort-wasm-simd-threaded.asyncify.wasm'),
+            os.path.join(NM, 'pdfjs-dist', 'build', 'pdf.min.mjs'),
+            os.path.join(NM, 'pdfjs-dist', 'build', 'pdf.worker.min.mjs'),
+            CMAPS]
 read = lambda p: open(p, encoding='utf-8').read()
+
+def make_cmaps():
+    """PDF の日本語・中国語・韓国語の文字の対応表（pdf.js の cmaps/*.bcmap）を {ファイル名: base64} の JSON 1つにまとめる"""
+    src = os.path.join(NM, 'pdfjs-dist', 'cmaps')
+    data = {f: base64.b64encode(open(os.path.join(src, f), 'rb').read()).decode() for f in sorted(os.listdir(src)) if f.endswith('.bcmap')}
+    os.makedirs(os.path.dirname(CMAPS), exist_ok=True)
+    open(CMAPS, 'w', encoding='utf-8').write(json.dumps(data, separators=(',', ':')))
 def write(p, s, bom=False):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     open(p, 'w', encoding='utf-8-sig' if bom else 'utf-8', newline='').write(s)
@@ -33,6 +45,12 @@ def zipdir(folder, zpath, root_name=None):
             for f in sorted(fs): z.write(os.path.join(r, f), (os.path.join(arc, f)).replace(os.sep, '/'))
     print('  ->', os.path.relpath(zpath, ROOT), os.path.getsize(zpath) // 1048576, 'MB')
 
+def copy_samples(out):
+    """配布物にテスト用資料とテストセットを入れる（Wikipedia の記事と、技術文書の2組）"""
+    for f in ['testset.json', 'testset-tech.json']: shutil.copy(os.path.join(SRC, f), out)
+    shutil.copytree(os.path.join(SRC, 'sample'), os.path.join(out, 'テスト用資料'))
+    shutil.copytree(os.path.join(SRC, 'sample-tech'), os.path.join(out, 'テスト用資料（技術文書）'))
+
 # ---------- 画面 ----------
 def pages():
     pb = read(os.path.join(SRC, 'prompt-builder.html'))
@@ -45,7 +63,7 @@ def inject(html, inline):
     be = read(os.path.join(SRC, 'browser_embed.js')).replace('</', '<\\/')
     rt = ''
     if inline:
-        rt = '<!-- 内蔵の計算エンジン: Transformers.js (Apache-2.0) / ONNX Runtime Web (MIT) -->\n' + ''.join(
+        rt = '<!-- 内蔵の計算エンジン: Transformers.js (Apache-2.0) / ONNX Runtime Web (MIT) / PDF.js (Apache-2.0) -->\n' + ''.join(
             f'<script type="application/octet-stream" id="rt{i}">{base64.b64encode(gzip.compress(open(f, "rb").read(), 9, mtime=0)).decode()}</script>\n'
             for i, f in enumerate(RT_FILES))
     return html.replace('<script id="core">', rt + '<script id="bembed">\n' + be + '</script>\n\n<script id="core">', 1)
@@ -63,11 +81,17 @@ def build_site():
     for f in RT_FILES: shutil.copy(f, os.path.join(site, 'runtime'))
     shutil.copy(os.path.join(NM, '@huggingface', 'transformers', 'LICENSE'), os.path.join(site, 'runtime', 'LICENSE-transformers.js.txt'))
     write(os.path.join(site, 'runtime', 'LICENSE-onnxruntime-web.txt'), 'onnxruntime-web (https://github.com/microsoft/onnxruntime)\nCopyright (c) Microsoft Corporation.\nLicensed under the MIT License.\n')
+    shutil.copy(os.path.join(NM, 'pdfjs-dist', 'LICENSE'), os.path.join(site, 'runtime', 'LICENSE-pdf.js.txt'))
     shutil.copytree(os.path.join(SRC, 'sample'), os.path.join(site, 'sample'))
     shutil.copy(os.path.join(SRC, 'testset.json'), os.path.join(site, 'sample'))
-    items = ''.join(f'<li><a href="{f}" download>{f}</a></li>' for f in sorted(os.listdir(os.path.join(site, 'sample'))))
+    shutil.copytree(os.path.join(SRC, 'sample-tech'), os.path.join(site, 'sample', 'tech'))
+    shutil.copy(os.path.join(SRC, 'testset-tech.json'), os.path.join(site, 'sample'))
+    li = lambda d, pre='': ''.join(f'<li><a href="{pre}{f}" download>{f}</a></li>' for f in sorted(os.listdir(d)) if os.path.isfile(os.path.join(d, f)))
     write(os.path.join(site, 'sample', 'index.html'), '<!doctype html><meta charset="utf-8"><title>テスト用資料</title><body style="font-family:sans-serif">'
-          '<h1>テスト用資料</h1><p>Wikipedia日本語版の記事の抜粋（CC BY-SA 4.0）と、評価用のテストセットです。</p><ul>' + items + '</ul><p><a href="../">戻る</a></p>')
+          '<h1>テスト用資料</h1><h2>Wikipedia の記事</h2><p>Wikipedia日本語版の記事の抜粋（CC BY-SA 4.0）。テストセットは testset.json。</p><ul>'
+          + li(os.path.join(site, 'sample')) + '</ul><h2>技術文書（架空のセンサ基板 SN-200）</h2><p>データシート・設計書・BOM など（PDF・Word・Excel・PowerPoint ほか）。'
+          'テストセットは testset-tech.json（精度テストの「テストセットを読み込む」で使います）。</p><ul>' + li(os.path.join(site, 'sample', 'tech'), 'tech/')
+          + '</ul><p><a href="../">戻る</a></p>')
     write(os.path.join(site, '.nojekyll'), '')
 
 def build_offline():
@@ -77,8 +101,7 @@ def build_offline():
     shutil.rmtree(os.path.dirname(out), ignore_errors=True)
     write(os.path.join(out, 'rag-prompt-builder.html'), inject(pb, True))
     write(os.path.join(out, 'rag-eval.html'), inject(ev, True))
-    shutil.copy(os.path.join(SRC, 'testset.json'), out)
-    shutil.copytree(os.path.join(SRC, 'sample'), os.path.join(out, 'テスト用資料'))
+    copy_samples(out)
     shutil.copytree(os.path.join(SRC, 'offline'), out, dirs_exist_ok=True)
     zipdir(out, os.path.join(DIST, 'RAG精度テスト.zip'))
 
@@ -122,13 +145,13 @@ def build_cli(target):
     shutil.copytree(os.path.join(NM, 'onnxruntime-node', 'bin', 'napi-v6', plat, 'x64'), os.path.join(eng, 'onnxruntime-node', 'bin', 'napi-v6', plat, 'x64'))
     subprocess.run([bun, 'build', os.path.join(NM, 'onnxruntime-node', 'dist', 'index.js'), '--target=node', '--format=cjs',
                     '--outfile', os.path.join(eng, 'onnxruntime-node', 'dist', 'ort-bundle.cjs')], check=True)
+    shutil.copy(os.path.join(NM, 'pdfjs-dist', 'LICENSE'), os.path.join(out, 'engine', 'LICENSE-pdf.js.txt'))
     write(os.path.join(out, 'engine', 'LICENSE.txt'), 'ONNX Runtime (https://github.com/microsoft/onnxruntime)\nCopyright (c) Microsoft Corporation. Licensed under the MIT License.\n'
           'DirectML / DirectX Shader Compiler: Microsoft のライセンスに従います。\n')
     os.makedirs(os.path.join(out, 'models'))
     shutil.copy(os.path.join(CLI, 'ここにモデルを置く.txt'), os.path.join(out, 'models'))
     for f in ['使い方.txt', 'rag.config.json']: shutil.copy(os.path.join(CLI, f), out)
-    shutil.copy(os.path.join(SRC, 'testset.json'), out)
-    shutil.copytree(os.path.join(SRC, 'sample'), os.path.join(out, 'テスト用資料'))
+    copy_samples(out)
     zipdir(out, os.path.join(DIST, f'RAG-CLI-{target}.zip'))
 
 def build_desktop(app_exe):
@@ -144,6 +167,7 @@ def build_desktop(app_exe):
 
 if __name__ == '__main__':
     args = sys.argv[1:] or ['site', 'offline']
+    if any(a != 'desktop' and a != '--app' for a in args): make_cmaps()
     i = 0
     while i < len(args):
         a = args[i]

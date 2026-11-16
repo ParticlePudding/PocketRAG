@@ -84,7 +84,7 @@
         <label class="btn">ファイルを選ぶ<input type="file" id="fileInput" class="hidden-input" multiple></label>
         <label class="btn">フォルダを選ぶ<input type="file" id="dirInput" class="hidden-input" webkitdirectory></label>
       </span>
-      <div class="muted" style="margin-top:6px">対応形式: .docx .xlsx .pptx .txt .md .csv .tsv .json .html .xml .log など（PDFは未対応。Wordで開いて.docxで保存すると読み込めます）</div>
+      <div class="muted" style="margin-top:6px">対応形式: .pdf .docx .xlsx .pptx .txt .md .csv .tsv .json .html .xml .log など（スキャン画像だけのPDFは読めません）</div>
     </div>
     <div class="row" style="margin-top:8px">
       <span id="docSummary" class="muted">資料はまだありません</span>
@@ -258,8 +258,15 @@ const Core = (() => {
     }
     pushPara();
 
-    const pieces = p => {
+    // 表（タブ区切りの行が2行以上ある段落）の列名の行＝最初のタブ区切りの行
+    const tableHead = t => { const tl = t.split('\n').filter(l => l.includes('\t')); return tl.length >= 2 ? tl[0] : null; };
+    const pieces = (p, isTable) => {
       if (p.length <= size) return [p];
+      if (isTable) {   // 表は行の途中で切らない
+        const res = [];
+        for (const l of p.split('\n')) { if (l.length <= size) res.push(l); else for (let i = 0; i < l.length; i += size) res.push(l.slice(i, i + size)); }
+        return res;
+      }
       const sents = p.match(/[^。！？!?\n]+[。！？!?]*\n?|\n/g) || [p];
       const res = []; let s = '';
       for (const x of sents) {
@@ -279,11 +286,18 @@ const Core = (() => {
     const emit = () => { if (acc.trim()) out.push({ heading: curHead || '', text: acc.trim() }); acc = ''; };
     for (const p of paras) {
       if (p.isHeading || p.heading !== curHead) { emit(); curHead = p.heading; if (p.isHeading) continue; }
-      for (const piece of pieces(p.text)) {
+      const head = tableHead(p.text);
+      for (const piece of pieces(p.text, !!head)) {
         if (acc && acc.length + piece.length + 1 > size) {
           const tail = overlap > 0 ? acc.slice(-overlap) : '';
           emit();
-          acc = tail ? tail + '\n' + piece : piece;
+          if (head) {
+            // 表が次のかたまりに続くときは、重なりを丸ごとの行にそろえ、先頭に列名の行を付け直す（何の列の値か分かるように）
+            const i = tail.indexOf('\n');
+            const rows = (i >= 0 ? tail.slice(i + 1) : '').split('\n').filter(l => l && l !== head);
+            const lead = piece.split('\n').includes(head) ? [] : [head];
+            acc = [...lead, ...rows, piece].join('\n');
+          } else acc = tail ? tail + '\n' + piece : piece;
         } else {
           acc = acc ? acc + '\n' + piece : piece;
         }
@@ -335,12 +349,14 @@ const Core = (() => {
   function embedPrefixes(model) {
     const m = (model || '').toLowerCase();
     if (/ruri/.test(m)) return { q: '検索クエリ: ', d: '検索文書: ' };
+    // EmbeddingGemma（1・2）：モデルカードの「文書検索」用の指示。文書名と見出しは本文側（chunkEmbedText）に含めるので title は none
+    if (/embeddinggemma/.test(m)) return { q: 'task: search result | query: ', d: 'title: none | text: ' };
     if (/e5/.test(m) && /instruct/.test(m)) return { q: 'Instruct: Given a question, retrieve passages that answer the question\nQuery: ', d: '' };
     if (/e5/.test(m)) return { q: 'query: ', d: 'passage: ' };
     if (/nomic/.test(m)) return { q: 'search_query: ', d: 'search_document: ' };
     return { q: '', d: '' };
   }
-  const EMBED_RE = /embed|e5|ruri|bge|gte|nomic|jina|minilm|sentence|retriev/i;
+  const EMBED_RE = /embed|e5|ruri|bge|gte|nomic|jina|minilm|sentence|retriev/i;   // embeddinggemma も embed で当たる
   const isEmbedModel = id => EMBED_RE.test(id || '');
 
   // チャンクをベクトル化するときの文章（文書名と見出しを付けて文脈を補う）
@@ -457,13 +473,28 @@ const Core = (() => {
     const xml = await z.read('word/document.xml');
     if (!xml) throw new Error('Word文書の本文が見つかりません');
     const lines = [];
-    for (const m of xml.matchAll(/<w:p[\s>][\s\S]*?<\/w:p>/g)) {
-      const p = m[0];
-      const style = (p.match(/<w:pStyle w:val="([^"]+)"/) || [])[1] || '';
+    const runs = p => {
       let t = '';
       for (const r of p.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>|<w:br\/>/g)) {
         t += r[1] !== undefined ? unesc(r[1]) : (r[0] === '<w:tab/>' ? '\t' : '\n');
       }
+      return t;
+    };
+    // 表は1行＝1行、セルの間はタブにする（Excel・PDF と同じ形。スペック表の行と列の対応を残すため）
+    for (const m of xml.matchAll(/<w:tbl>[\s\S]*?<\/w:tbl>|<w:p[\s>][\s\S]*?<\/w:p>/g)) {
+      const p = m[0];
+      if (p.startsWith('<w:tbl>')) {
+        lines.push('');
+        for (const tr of p.matchAll(/<w:tr[\s>][\s\S]*?<\/w:tr>/g)) {
+          const cells = [...tr[0].matchAll(/<w:tc[\s>][\s\S]*?<\/w:tc>/g)]
+            .map(tc => [...tc[0].matchAll(/<w:p[\s>][\s\S]*?<\/w:p>/g)].map(x => runs(x[0]).replace(/\s+/g, ' ').trim()).filter(Boolean).join(' '));
+          if (cells.some(c => c)) lines.push(cells.join('\t'));
+        }
+        lines.push('');
+        continue;
+      }
+      const style = (p.match(/<w:pStyle w:val="([^"]+)"/) || [])[1] || '';
+      const t = runs(p);
       if (!t.trim()) { lines.push(''); continue; }
       const lv = (style.match(/^(?:heading|見出し)\s*(\d)$/i) || style.match(/^(\d)$/) || [])[1];
       if (lv) lines.push('', '#'.repeat(Math.min(6, +lv)) + ' ' + t.trim());
@@ -488,15 +519,71 @@ const Core = (() => {
     return out.join('\n');
   }
 
+  // Excel の組み込みの表示形式（番号 → 書式）。日本語版の和暦・年月日（27〜31、36、50〜58）と時刻（32〜35）も日付・時刻として扱う
+  const XL_FMT = { 1: '0', 2: '0.00', 3: '#,##0', 4: '#,##0.00', 9: '0%', 10: '0.00%', 11: '0.00E+00', 14: 'yyyy/m/d', 15: 'd-mmm-yy', 16: 'd-mmm',
+    17: 'mmm-yy', 18: 'h:mm AM/PM', 19: 'h:mm:ss AM/PM', 20: 'h:mm', 21: 'h:mm:ss', 22: 'yyyy/m/d h:mm', 37: '#,##0 ;(#,##0)', 38: '#,##0 ;(#,##0)',
+    39: '#,##0.00;(#,##0.00)', 40: '#,##0.00;(#,##0.00)', 45: 'mm:ss', 46: '[h]:mm:ss', 47: 'mm:ss.0', 49: '@', 32: 'h:mm', 33: 'h:mm', 34: 'h:mm:ss', 35: 'h:mm:ss' };
+  for (const i of [27, 28, 29, 30, 31, 36, 50, 51, 52, 53, 54, 55, 56, 57, 58]) XL_FMT[i] = 'yyyy/m/d';
+
+  // 数値のセルを、Excel の表示形式に従って文字にする。日付は 2026-07-30、時刻は 13:05 の形にそろえる（和暦や「7月30日」の表示でも同じ形）。
+  // ％・通貨記号・桁区切り・小数の桁数・"円" などの文字は表示どおりにする。
+  function excelNumber(raw, code, date1904) {
+    const n = Number(raw);
+    const plain = () => Number.isInteger(n) ? String(n) : String(+n.toPrecision(15));
+    if (raw === '' || !isFinite(n) || !code || /^general$/i.test(code) || code === '@') return isFinite(n) && raw !== '' ? plain() : raw;
+    const secs = code.split(';');
+    const sec = n < 0 && secs[1] !== undefined ? secs[1] : n === 0 && secs[2] !== undefined ? secs[2] : secs[0];
+    const minus = n < 0 && secs[1] === undefined ? '-' : '';
+    // 書式の文字だけを見るため、"文字"・\文字・[色] などを除いたもの（[h] のような経過時間は残す）
+    const bare = sec.replace(/"[^"]*"/g, '').replace(/\\./g, '').replace(/[_*]./g, '').replace(/\[[^\]]*\]/g, m => /^\[[hms]+\]$/i.test(m) ? m : '');
+    if (/[ymdhsg]/i.test(bare) && !/E[+-]/i.test(bare)) {
+      const ms = Math.round((n + (date1904 ? 1462 : 0) - 25569) * 86400000);
+      const d = new Date(ms), p = x => String(x).padStart(2, '0');
+      const hasTime = /[hs]/i.test(bare), hasDate = /[ydg]/i.test(bare) || (/m/i.test(bare) && !hasTime);
+      const time = /\[h+\]/i.test(bare) ? `${Math.floor(n * 24)}:${p(d.getUTCMinutes())}` + (/s/i.test(bare) ? ':' + p(d.getUTCSeconds()) : '')
+        : `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}` + (/s/i.test(bare) ? ':' + p(d.getUTCSeconds()) : '');
+      const date = `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}` + (/d/i.test(bare) || !/y/i.test(bare) ? '-' + p(d.getUTCDate()) : '');
+      return hasDate && hasTime ? date + ' ' + time : hasDate ? date : time;
+    }
+    const pct = (bare.match(/%/g) || []).length;
+    const x = Math.abs(n) * 100 ** pct;
+    const dec = (bare.match(/\.([0#?]+)/) || [, ''])[1], minD = (dec.match(/0/g) || []).length;
+    let s;
+    if (/E[+-]/i.test(bare)) s = x.toExponential(dec.length).toUpperCase();
+    else {
+      s = x.toFixed(dec.length);
+      if (dec.length > minD) s = s.replace(new RegExp(`(\\.\\d{${minD}}\\d*?)0+$`), '$1').replace(/\.$/, '');
+      if (/[0#?],[0#?]/.test(bare)) s = s.replace(/^(\d+)/, m => m.replace(/\B(?=(\d{3})+$)/g, ','));
+    }
+    // 数字の前後の文字（通貨記号・"円"・括弧など）
+    const lit = sec.replace(/\[\$([^\]-]*)[^\]]*\]/g, '"$1"').replace(/\[[^\]]*\]/g, '').replace(/_./g, '').replace(/\*./g, '').replace(/\\(.)/g, '"$1"');
+    const at = [...lit.matchAll(/"[^"]*"|[0#?]/g)].filter(m => m[0][0] !== '"').map(m => m.index);
+    const strip = t => t.replace(/"([^"]*)"/g, '$1').replace(/[%]/g, '');
+    const pre = at.length ? strip(lit.slice(0, at[0])) : '', post = at.length ? strip(lit.slice(at[at.length - 1] + 1).replace(/E[+-]0+/i, '')) : '';
+    return (minus + pre.trimStart() + s + '%'.repeat(pct) + post).trim();
+  }
+
+  // Excel：シートごとに「# シート: 名前」の見出しを付け、1行をタブ区切りの1行にする。
+  //  ・セルは列の位置（A、B、…）どおりに並べる。空のセルは空欄のまま残す（右の値が左にずれないように）
+  //  ・数値は表示形式どおり（日付・％・通貨・桁区切り）。縦に結合したセルは、下の行にも同じ値を入れる
+  //  ・空の行が続くところは段落の区切り（別の表）とする。先頭の空の列はまとめて除く
   async function xlsxText(buf) {
     const z = await unzip(buf);
     const ssx = (await z.read('xl/sharedStrings.xml') || '').replace(/<rPh[\s>][\s\S]*?<\/rPh>/g, ''); // ふりがなを除く
     const texts = s => [...s.matchAll(/<t(?:\s[^>]*)?>([^<]*)<\/t>/g)].map(x => unesc(x[1])).join('');
-    const ss = [...ssx.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(m => texts(m[1]));
+    const ss = [...ssx.matchAll(/<si>([\s\S]*?)<\/si>|<si\/>/g)].map(m => texts(m[1] || ''));
     const wb = await z.read('xl/workbook.xml') || '';
     const rels = await z.read('xl/_rels/workbook.xml.rels') || '';
     const attr = (s, a) => (s.match(new RegExp('\\s' + a + '="([^"]*)"')) || [])[1];
     const rmap = new Map([...rels.matchAll(/<Relationship\s[^>]*>/g)].map(m => [attr(m[0], 'Id'), attr(m[0], 'Target')]));
+    const date1904 = /<workbookPr\s[^>]*date1904="(1|true)"/.test(wb);
+    // 表示形式：セルの s（スタイル番号）→ cellXfs の numFmtId → 書式
+    const styles = await z.read('xl/styles.xml') || '';
+    const fmts = new Map([...styles.matchAll(/<numFmt\s[^>]*>/g)].map(m => [+attr(m[0], 'numFmtId'), unesc(attr(m[0], 'formatCode') || '')]));
+    const xfs = [...((styles.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/) || [])[1] || '').matchAll(/<xf\s[^>]*>/g)].map(m => +(attr(m[0], 'numFmtId') || 0));
+    const fmtOf = s => { const id = xfs[+s || 0] || 0; return fmts.get(id) ?? XL_FMT[id] ?? ''; };
+    const colNo = ref => { let c = 0; for (const ch of (ref.match(/^[A-Z]+/) || ['A'])[0]) c = c * 26 + ch.charCodeAt(0) - 64; return c - 1; };
+    const rowNo = ref => +(ref.match(/\d+$/) || [0])[0];
     const out = [];
     for (const m of wb.matchAll(/<sheet\s[^>]*>/g)) {
       const name = unesc(attr(m[0], 'name') || '');
@@ -504,20 +591,65 @@ const Core = (() => {
       if (!target) continue;
       const xml = await z.read(target.startsWith('/') ? target.slice(1) : 'xl/' + target.replace(/^\.\//, ''));
       if (!xml) continue;
-      out.push('# シート: ' + name);
-      for (const r of xml.replace(/<row[^>]*\/>/g, '').matchAll(/<row[\s>][\s\S]*?<\/row>/g)) {
-        const cells = [...r[0].matchAll(/<c\s([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)].map(c => {
-          const t = attr(' ' + c[1], 't'), inner = c[2] || '';
+      const grid = new Map();   // 行番号 → [列ごとの値]
+      let lastRow = 0;
+      for (const r of xml.replace(/<row[^>]*\/>/g, '').matchAll(/<row(\s[^>]*)?>([\s\S]*?)<\/row>/g)) {
+        const rn = +(attr(r[1] || '', 'r') || lastRow + 1); lastRow = rn;
+        const cells = []; let col = -1;
+        for (const c of r[2].matchAll(/<c(\s[^>]*?)?(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+          const a = ' ' + (c[1] || ''), ref = attr(a, 'r');
+          col = ref ? colNo(ref) : col + 1;
+          const t = attr(a, 't'), inner = c[2] || '';
           const v = (inner.match(/<v>([^<]*)<\/v>/) || [])[1];
-          if (t === 's') return ss[+v] ?? '';
-          if (t === 'inlineStr') return texts(inner);
-          return v !== undefined ? unesc(v) : '';
-        });
-        if (cells.some(x => x.trim())) out.push(cells.join('\t'));
+          let val;
+          if (t === 's') val = ss[+v] ?? '';
+          else if (t === 'inlineStr') val = texts(inner);
+          else if (t === 'b') val = v === '1' ? 'TRUE' : v === '0' ? 'FALSE' : '';
+          else if (t === 'str' || t === 'e') val = v !== undefined ? unesc(v) : '';
+          else if (t === 'd') val = (v || '').replace('T00:00:00', '').replace('T', ' ');
+          else val = v !== undefined ? excelNumber(unesc(v), fmtOf(attr(a, 's')), date1904) : '';
+          cells[col] = val.replace(/\r?\n/g, ' ');   // セルの中の改行は空白に（1行＝1行を保つ）
+        }
+        grid.set(rn, cells);
+      }
+      // 縦に結合したセル：左上の値を下の行の同じ列にも入れる（「区分」の列などが空欄にならないように）
+      for (const mc of xml.matchAll(/<mergeCell\s[^>]*ref="([A-Z]+\d+):([A-Z]+\d+)"/g)) {
+        const r1 = rowNo(mc[1]), r2 = rowNo(mc[2]), c1 = colNo(mc[1]);
+        const v = (grid.get(r1) || [])[c1];
+        if (!v || r2 <= r1) continue;
+        for (let rr = r1 + 1; rr <= r2; rr++) { const row = grid.get(rr) || []; if (!row[c1]) row[c1] = v; grid.set(rr, row); }
+      }
+      const rows = [...grid.entries()].filter(([, c]) => c.some(x => x && x.trim())).sort((a, b) => a[0] - b[0]);
+      const left = Math.min(...rows.map(([, c]) => c.findIndex(x => x && x.trim())));
+      out.push('# シート: ' + name + (/state="(hidden|veryHidden)"/.test(m[0]) ? '（非表示）' : ''));
+      let prev = null;
+      for (const [rn, c] of rows) {
+        if (prev !== null && rn - prev > 1) out.push('');   // 空の行をはさんだら別の表
+        const cells = Array.from({ length: c.length }, (_, i) => c[i] || '').slice(left);
+        while (cells.length && !cells[cells.length - 1].trim()) cells.pop();
+        out.push(cells.join('\t'));
+        prev = rn;
       }
       out.push('');
     }
     return out.join('\n');
+  }
+
+  // CSV・TSV：引用符（"…"）の中のカンマや改行を正しく扱い、Excel と同じタブ区切りの行にする
+  function csvText(s, delim) {
+    const rows = []; let row = [], cell = '', q = false;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (q) {
+        if (ch === '"') { if (s[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+        else cell += ch === '\r' || ch === '\n' ? (ch === '\n' ? ' ' : '') : ch;
+      } else if (ch === '"' && !cell) q = true;
+      else if (ch === delim) { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') { if (ch === '\r' && s[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+      else cell += ch;
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row); }
+    return rows.map(r => r.map(c => c.replace(/\t/g, ' ').trim()).join('\t').replace(/\t+$/, '')).join('\n');
   }
 
   function htmlText(s) {
@@ -529,6 +661,109 @@ const Core = (() => {
     return unesc(s).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
   }
 
+  // PDF：pdf.js が返す「文字列とその位置」から行を組み立てる。
+  //  ・同じ高さの文字を1行にまとめ、左から並べる。離れた文字の間はタブにして、表（スペック表など）の列を残す。
+  //  ・どのページでも上端・下端に出てくる同じ文（ヘッダー・フッター）は取り除く（数字はページ番号とみなして無視）。
+  //  ・右端まで埋まった行や、文の途中で終わっている行の次の行は、折り返しの続きとみなしてつなぐ（日本語は詰めて、英語は空白で）。
+  //  ・本文より大きい文字の短い行は見出し（## ）にする。ページの先頭には「直前の見出し（p.ページ番号）」を見出しとして付け、
+  //    ページをまたぐ表でも何の表か分かるようにする。
+  //  pages: [{ height, items: [{ str, x, y, w, h }, ...] }, ...]（y は下から上へ増える PDF の座標）
+  function pdfLayoutText(pages) {
+    const hs = pages.flatMap(p => p.items).filter(t => t.str.trim() && t.h > 0).map(t => t.h).sort((a, b) => a - b);
+    const body = hs.length ? hs[Math.floor(hs.length / 2)] : 10;   // 本文の文字の大きさ（中央値）
+    const pl = pages.map(pg => {
+      const its = pg.items.filter(t => t.str.trim()).sort((a, b) => b.y - a.y || a.x - b.x);
+      const lines = [];
+      for (const t of its) {
+        const L = lines[lines.length - 1];
+        if (L && Math.abs(L.y - t.y) <= 0.45 * Math.max(L.h, t.h, 1)) { L.items.push(t); L.h = Math.max(L.h, t.h); }
+        else lines.push({ y: t.y, h: t.h, items: [t] });
+      }
+      for (const L of lines) {
+        L.items.sort((a, b) => a.x - b.x);
+        let s = '', end = null;
+        for (const t of L.items) {
+          if (end !== null) {
+            const gap = t.x - end, h = Math.max(t.h, body * 0.5, 1);
+            if (gap > h * 0.8) s += '\t';
+            else if (gap > h * 0.15 && !/\s$/.test(s) && !/^\s/.test(t.str)) s += ' ';
+          }
+          s += t.str; end = t.x + t.w;
+        }
+        L.s = s.replace(/[ 　]*\t[\t 　]*/g, '\t').replace(/ {2,}/g, ' ').trim();
+        L.x0 = L.items[0].x; L.x1 = end; L.tab = L.s.includes('\t');
+      }
+      return { height: pg.height || 0, lines: lines.filter(L => L.s) };
+    });
+    const edge = (p, L) => p.height > 0 && (L.y < p.height * 0.08 || L.y > p.height * 0.92);
+    if (pl.length >= 2) {
+      const key = L => L.s.replace(/\d+/g, '#'), cnt = new Map();
+      for (const p of pl) for (const k of new Set(p.lines.filter(L => edge(p, L)).map(key))) cnt.set(k, (cnt.get(k) || 0) + 1);
+      const min = Math.max(2, Math.ceil(pl.length / 2));
+      for (const p of pl) p.lines = p.lines.filter(L => !(edge(p, L) && cnt.get(key(L)) >= min));
+    }
+    const CJK = /[　-ヿ㐀-鿿＀-￯]/;
+    const LIST = /^([・•\-–*●■□◆○※]|\d+[.)．]\s|[（(]\d+[）)])/;
+    const out = []; let lastHead = '';
+    pl.forEach((p, pi) => {
+      out.push('', '# ' + (lastHead ? `${lastHead}（p.${pi + 1}）` : `p.${pi + 1}`));
+      const plain = p.lines.filter(L => !L.tab);
+      const left = Math.min(...plain.map(L => L.x0)), right = Math.max(...plain.map(L => L.x1));
+      let prev = null;
+      for (const L of p.lines) {
+        const gapBig = prev && prev.y - L.y > Math.max(L.h, body) * 1.9;
+        if (L.h >= body * 1.3 && L.s.length <= 60 && !L.tab && !/^[\d\s.,%-]+$/.test(L.s)) {
+          if (prev && prev.kind === 'head' && !gapBig) {   // 2行に折り返した見出しは1つにまとめる
+            lastHead += (CJK.test(lastHead.slice(-1)) || CJK.test(L.s[0]) ? '' : ' ') + L.s; out[out.length - 1] = '## ' + lastHead;
+          } else { out.push('', '## ' + L.s); lastHead = L.s; }
+          prev = { ...L, kind: 'head' }; continue;
+        }
+        if (gapBig && !(prev.tab && L.tab)) out.push('');   // 行間が空いていれば段落の区切り（表の行の間は除く）
+        const wrap = prev && !gapBig && prev.kind === 'text' && !prev.tab && !L.tab && !LIST.test(L.s)
+          && (prev.x1 >= right - Math.max(body * 2, (right - left) * 0.08) || !/[。．.!?！？:：]$/.test(out[out.length - 1]));
+        if (wrap) {
+          const a = out[out.length - 1];
+          out[out.length - 1] = a + (CJK.test(a.slice(-1)) || CJK.test(L.s[0]) ? '' : ' ') + L.s;
+        } else out.push(L.s);
+        prev = { ...L, kind: 'text' };
+      }
+    });
+    return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  // PDF の読み込み。pdf.js は画面（BrowserEmbed）や CLI が globalThis.RAG_PDF として用意する
+  async function pdfText(buf) {
+    const loader = typeof globalThis !== 'undefined' && globalThis.RAG_PDF;
+    if (!loader) throw new Error('PDFの読み込み機能（pdf.js）がありません');
+    const { pdfjs, cmap } = await loader();
+    // 日本語・中国語などの標準フォントを使う PDF は文字の対応表（CMap）が必要。外部から取らず、同梱したものを渡す
+    class LocalData {
+      async fetch({ kind, filename }) {
+        const b = kind === 'cMapUrl' ? cmap(filename) : null;
+        if (!b) throw new Error('同梱していないデータです: ' + filename);
+        return b;
+      }
+      destroy() {}
+    }
+    const task = pdfjs.getDocument({ data: new Uint8Array(buf.slice(0)), BinaryDataFactory: LocalData, cMapUrl: 'cmaps/', cMapPacked: true,
+      useWorkerFetch: false, isEvalSupported: false, disableFontFace: true, verbosity: 0 });
+    const doc = await task.promise;
+    try {
+      const pages = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const tc = await page.getTextContent();
+        pages.push({ height: page.view[3] - page.view[1], items: tc.items.filter(t => typeof t.str === 'string').map(t => ({
+          str: t.str, x: t.transform[4] - page.view[0], y: t.transform[5] - page.view[1], w: t.width, h: t.height || Math.hypot(t.transform[2], t.transform[3]) })) });
+        page.cleanup();
+      }
+      const text = pdfLayoutText(pages);
+      const chars = text.replace(/^#.*$/gm, '').replace(/\s/g, '').length;
+      if (chars < 20 * doc.numPages && chars < 200) throw new Error('文字情報がほとんどないPDFです（スキャンした画像のPDFは読めません。OCR済みのPDFにしてください）');
+      return text;
+    } finally { await task.destroy(); }
+  }
+
   const TEXT_EXT = ['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'conf', 'text'];
   async function extractText(name, buf) {
     const ext = (name.split('.').pop() || '').toLowerCase();
@@ -536,8 +771,9 @@ const Core = (() => {
     if (ext === 'pptx') return pptxText(buf);
     if (ext === 'xlsx' || ext === 'xlsm') return xlsxText(buf);
     if (ext === 'html' || ext === 'htm') return htmlText(decodeText(buf));
+    if (ext === 'csv' || ext === 'tsv') return csvText(decodeText(buf), ext === 'csv' ? ',' : '\t');
     if (TEXT_EXT.includes(ext)) return decodeText(buf);
-    if (ext === 'pdf') throw new Error('PDFは未対応です（Wordで開いて.docxで保存すると読み込めます）');
+    if (ext === 'pdf') return pdfText(buf);
     if (['doc', 'xls', 'ppt'].includes(ext)) throw new Error('古いOffice形式です（.docx/.xlsx/.pptxで保存し直してください）');
     throw new Error('未対応の形式です');
   }
@@ -740,7 +976,7 @@ if (typeof module !== 'undefined') module.exports = Core;
     if (!window.RAG_APP) return;
     try {
       const ids = ((await (await fetch(window.RAG_APP.embedUrl + '/models')).json()).data || []).map(m => m.id);
-      $('setAppModel').innerHTML = ids.length ? ids.map(id => `<option value="${esc(id)}"${id === settings.appModel ? ' selected' : ''}>${esc(BrowserEmbed.label(id))}</option>`).join('') : '<option value="">（モデルがありません）</option>';
+      $('setAppModel').innerHTML = ids.length ? ids.map(id => `<option value="${esc(id)}"${id === settings.appModel ? ' selected' : ''}>${esc(BrowserEmbed.label(id, true))}</option>`).join('') : '<option value="">（モデルがありません）</option>';
       if (!ids.includes(settings.appModel)) { settings.appModel = ids.find(n => /ruri/i.test(n)) || ids[0] || ''; saveSettings(); $('setAppModel').value = settings.appModel; }
       $('appInfo').textContent = window.RAG_APP.engine === 'native' ? 'ネイティブ版エンジンで計算します（高速）' : 'WASM版エンジン（予備）で計算します';
     } catch (e) { $('appInfo').innerHTML = `<span class="warn">アプリに接続できません（${esc(e.message)}）</span>`; }

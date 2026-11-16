@@ -364,7 +364,7 @@
     const app = appEmbs || [];
     const wm = BrowserEmbed.info().models, web = wm.map(m => 'web:' + m.name);
     const tag = id => { const m = wm.find(x => 'web:' + x.name === id); return m && m.online ? (m.cached ? ' — オンライン・取得済み' : ` — オンライン（初回 ${m.size}）`) : ''; };
-    const opt = id => `<option value="${esc(id)}"${id === cfg.embModel ? ' selected' : ''}>${esc(id.startsWith('web:') ? BrowserEmbed.label(id.slice(4)) + tag(id) : id.startsWith('app:') ? BrowserEmbed.label(id.slice(4)) : id)}</option>`;
+    const opt = id => `<option value="${esc(id)}"${id === cfg.embModel ? ' selected' : ''}>${esc(id.startsWith('web:') ? BrowserEmbed.label(id.slice(4)) + tag(id) : id.startsWith('app:') ? BrowserEmbed.label(id.slice(4), true) : id)}</option>`;
     $('embModel').innerHTML = (app.length ? `<optgroup label="このアプリ（ネイティブ・高速）">${app.map(opt).join('')}</optgroup>` : '')
       + (web.length ? `<optgroup label="ブラウザ内">${web.map(opt).join('')}</optgroup>` : '')
       + (lmEmbs.length ? `<optgroup label="LM Studio">${lmEmbs.map(opt).join('')}</optgroup>` : '')

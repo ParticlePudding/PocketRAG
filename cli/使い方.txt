@@ -11,6 +11,12 @@ rag.exe と同じ場所の engine フォルダ（ネイティブ版エンジン�
   cd このフォルダ
   .\rag.exe help
 
+■ 読み込める資料
+PDF、Word（.docx）、Excel（.xlsx）、PowerPoint（.pptx）、テキスト、Markdown、CSV、HTML など。
+表はタブ区切りの行として読み取ります（データシートのスペック表など）。スキャンした画像だけの PDF は読めません。
+Excel は空のセルを空欄のまま残し、日付・％・通貨などは画面の表示どおりにします。長い表を分けるときは、分けた後ろの部分にも列名の行を付けます。
+どう読み取られたかは  .ag.exe text 資料.pdf  で確認できます。
+
 ■ 基本の流れ
 1. 資料をインデックス化（最初と、資料を更新したときに1回）
      .\rag.exe index .\テスト用資料
@@ -30,7 +36,7 @@ rag.exe と同じ場所の engine フォルダ（ネイティブ版エンジン�
   -k 5              プロンプトに入れる資料の件数
   -f qa|summary|extract|compare   回答の形式（質問に答える／要約／抜き出し／表）
   --instr "300字以内で"   回答の形式に追加する指示
-  -m ruri-v3-30m    使う埋め込みモデル（index のとき）
+  -m ruri-v3-30m    使う埋め込みモデル（index のとき）。ruri-v3-30m / bge-m3 / embeddinggemma-2
   --keyword         意味検索を使わずキーワード検索だけにする
   --base-file 基本.txt / --extra-file 追加.txt / --no-extra   プロンプトのルールを差し替える
   rag.config.json   よく使う設定を書いておくファイル（同じフォルダかカレントフォルダ）
@@ -42,6 +48,11 @@ rag.exe と同じ場所の engine フォルダ（ネイティブ版エンジン�
 ■ 速さの調整
   --threads 4       CPU のスレッド数（既定は自動）
   --device dml      Windows の GPU（DirectML）で計算（環境によっては CPU の方が速いこともあります）
+
+■ テスト用資料
+  テスト用資料\                 Wikipedia の記事 6 件（testset.json で評価）
+  テスト用資料（技術文書）\     架空のセンサ基板のデータシート・設計書・BOM など 13 件（testset-tech.json で評価）
+    .ag.exe eval testset-tech.json -m embeddinggemma-2
 
 ■ ブラウザ版との関係
 検索・プロンプト生成の仕組みはブラウザ版（rag-prompt-builder.html）と同じものです。

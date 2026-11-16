@@ -16,20 +16,23 @@ src/prompt-builder.html   プロンプトビルダー。検索・プロンプト
 src/eval-template.html    精度テスト（/*CORE*/ と /*TESTSET*/ をビルド時に埋め込む）
 src/browser_embed.js      ブラウザ内ベクトル化 BrowserEmbed（Transformers.js + ONNX Runtime Web）
 src/testset.json          評価用テストセット（Wikipedia 6記事・34問）。src/sample/ がその資料
+src/testset-tech.json     評価用テストセット（架空のセンサ基板 SN-200 の技術文書 13件・48問）。src/sample-tech/ がその資料
 src/offline/              オフライン配布版に同梱する説明書とモデル取得スクリプト（PowerShell）
 cli/src/main.js           CLI（Bun）。index / search / prompt / ask / eval / models / rules / serve / app
 cli/src/embed.js          CLI のベクトル化（ネイティブ版 onnxruntime-node。無ければ WASM 版に自動で切替）
 desktop/src-tauri/        デスクトップ版（Tauri 2）。同じフォルダの rag.exe を「serve --port 0 --print-url」で起動してウィンドウで開くだけ
 scripts/build.py          すべてのビルド（site / offline / cli-windows / cli-linux / desktop）
 scripts/patch_tjs.py      CLI 用に Transformers.js の minify 済みコードへ手当て（下の「落とし穴」参照）
-tests/                    ダミーモデル・速度比較用モデルの生成スクリプト
+tests/                    ダミーモデル・速度比較用モデルの生成、技術文書の資料とテストセットの生成（make_tech_samples.py / make_tech_testset.py）、
+                          埋め込みモデルの検索性能の比較（eval_retrieval.mjs）
+docs/埋め込みモデルの比較.md   ruri / bge-m3 / EmbeddingGemma 2 の比較結果
 .github/workflows/        pages.yml（Pages 公開）, release.yml（Windows 向け配布物をビルド）
 ```
 生成物（.gitignore 済み）：`dist/`, `cli/runtime/`, `cli/site/`, `cli/src/core.cjs`, `cli/src/site_files.js`
 
 ## ビルド
 ```
-npm install                                   # @huggingface/transformers 4.3.2（固定）と onnxruntime-node/web
+npm install                                   # @huggingface/transformers 4.3.2（固定）、onnxruntime-node/web、pdfjs-dist 6.5.438（固定）
 python scripts/build.py site offline          # dist/site（Pages 版）, dist/RAG精度テスト.zip（オフライン版）
 python scripts/build.py cli-windows           # dist/RAG-CLI-windows.zip（要 Bun。Linux からのクロスビルド可）
 python scripts/build.py desktop --app <tauri の exe>   # cli-windows の後。dist/RAG-Desktop.zip
@@ -46,9 +49,18 @@ Windows で Python を使うときは `PYTHONUTF8=1` を付ける（日本語の
 | デスクトップ版 | rag.exe の `/v1/embeddings` を画面から呼ぶ（エンジン選択「このアプリ」） | `window.RAG_APP` が注入され、既定でオフライン |
 
 ## 主な仕様・決定事項
+- 資料の読み込み（Core.extractText）：PDF は pdf.js（文字の位置から行を組み立て、離れた文字の間はタブ＝表の列。ヘッダー・フッターの除去、
+  折り返しの連結、大きい文字の行を見出しに、ページ先頭に「直前の見出し（p.N）」）。Word の表もタブ区切りの行。
+  Excel はセルの列位置（r="C5"）どおりに並べて空欄を保ち、表示形式（styles.xml の numFmt）で日付→2026-07-30・％・通貨・桁区切りにする（excelNumber）。
+  縦に結合したセルは下の行にも同じ値を入れる。空の行をはさむと別の表。CSV/TSV も引用符を解釈してタブ区切りの行にする（csvText）。
+- 分割（chunkText）：タブ区切りの行が2行以上ある段落を表とみなし、行の途中で切らず、2つ目以降のかたまりの先頭に列名の行（最初のタブ区切りの行）を付け直す。
+  どう読み取られたかは `rag text <資料>` で確認できる。スキャン画像だけの PDF はエラー（OCR は非対応）。
 - 検索：BM25（日本語は文字バイグラム、索引時はユニグラムも）＋文書名トークン（タイトル一致で1.5倍）。ハイブリッドは RRF（k=60）。
-- 埋め込みモデル：**ruri-v3-30m**（名古屋大、日本語特化・軽量。`sirasagi62/ruri-v3-30m-ONNX`）と **bge-m3**（`Xenova/bge-m3`）。
-  - 接頭辞は `Core.embedPrefixes(名前)`：ruri は「検索クエリ: / 検索文書: 」、e5 は query:/passage:、bge は無し。
+- 埋め込みモデル：**ruri-v3-30m**（名古屋大、日本語特化・軽量。`sirasagi62/ruri-v3-30m-ONNX`）、**bge-m3**（`Xenova/bge-m3`）、
+  **EmbeddingGemma 2**（`onnx-community/embeddinggemma-2-ONNX`。CLI・デスクトップ版のみ。`rag models download gemma`）。
+  - 接頭辞は `Core.embedPrefixes(名前)`：ruri は「検索クエリ: / 検索文書: 」、EmbeddingGemma は「task: search result | query: 」/「title: none | text: 」、
+    e5 は query:/passage:、bge は無し。
+  - EmbeddingGemma 2 はパイプラインを使わず、文章用の部品だけを AutoModel で読み込み sentence_embedding を使う（loadExtractor。画像・音声の部品は読まない）。
   - プーリング：`1_Pooling/config.json` があれば従う。無ければ名前に bge を含むと cls、それ以外は mean。
   - 量子化形式：CPU/WASM は q8 優先、WebGPU は fp16 優先（無ければ順に代替）。
 - プロンプト：基本プロンプト（`Core.DEFAULT_BASE`）＋追加プロンプト（`Core.DEFAULT_EXTRA`：漏れなく答える・日付/数値/区分を含める）。
@@ -62,6 +74,12 @@ Windows で Python を使うときは `PYTHONUTF8=1` を付ける（日本語の
 3. **CLI のネイティブ版**は `globalThis[Symbol.for('onnxruntime')]` に onnxruntime-node を入れて渡す。この経路ではデバイス一覧が空になるため、`scripts/patch_tjs.py` が minify 済みコードの該当箇所を正規表現で書き換える（`globalThis.__ragDevices`）。**Transformers.js を更新するとパターンがずれる可能性がある**ので、更新時はビルドが「patch point not found」で止まらないか確認。
 4. **Bun でコンパイルした exe はパッケージ名で require できない**。そのため onnxruntime-node と onnxruntime-common を `ort-bundle.cjs` に1ファイル化し、`binding.js` と同じ `dist/` に置いている（`../bin/napi-v6/<OS>/x64/onnxruntime_binding.node` の相対パスを保つため）。読み込みは `createRequire(engine/loader.js)` で絶対パス指定。
 5. Tauri 側は rag.exe の標準出力の1行目（URL）を待つ。rag 側は `serve --print-url` のとき URL だけを stdout に、ログはすべて stderr に出すこと。
+6. **pdf.js は worker を別スレッドにせず**、`globalThis.pdfjsWorker` に worker のモジュールを入れて同じスレッドで動かす（file:// と exe で動かすため）。
+   CMap は `dist/_gen/cmaps.json`（build.py の make_cmaps）を同梱し、`BinaryDataFactory` で渡す（外部から取らない）。pdf.js 6 では文書オブジェクトに
+   destroy が無いので `loadingTask.destroy()` を使う。並びは build.py の RT_FILES と browser_embed.js の RUNTIME を一致させる（HTML 内蔵の rt0〜rt5）。
+7. **EmbeddingGemma 2 はブラウザでは動かない**：ONNX の全形式（q8・q4・q4f16・fp16）が GatherBlockQuantized を使い、onnxruntime-web 1.31（Transformers.js 4.3.2〜4.4.0-next）に
+   実装がない。ブラウザ側は分かりやすいエラーにしている（`globalThis.RAG_TRY_EG2 = true` で試せる）。ネイティブ版（onnxruntime-node 1.30）では動く。
+8. このリポジトリのファイルは **CRLF** で保存されている（core.autocrlf=true）。スクリプトで書き換えるときは改行を CRLF のまま保つ（README.md と新しいファイルは LF）。
 
 ## 今の状態
 - 動作確認済み（Linux・ヘッドレス Chrome + Playwright、ダミーモデル／同じ計算量の代用モデル）：
@@ -73,7 +91,16 @@ Windows で Python を使うときは `PYTHONUTF8=1` を付ける（日本語の
   - `build.py site offline cli-windows desktop` と Tauri の `cargo build --release --locked` が通る。
   - rag.exe：ネイティブ版エンジンの読み込み、本物の ruri-v3-30m で index（51チャンク：CPU 0.9 秒／DirectML 2.2 秒）・search・prompt・eval（根拠が上位5件に 30/30）。
   - デスクトップ版：起動（rag.exe は 127.0.0.1 のみで待ち受け）、通常終了・強制終了のどちらでも rag.exe が残らない（ジョブオブジェクトで道連れにする。`tie_to_app_lifetime`）。
-- **未確認**：本物のモデルでの CLI とブラウザ版のベクトル一致、bge-m3 での CLI。
+- **2026-11-16 追加**：PDF の読み込み（全形態）、Word の表をタブ区切りに、`rag text`、EmbeddingGemma 2（CLI・デスクトップ版）、技術文書のテストセット。
+  - PDF：CLI（exe）、Pages 版、オフライン版（HTML 内蔵のエンジン）で同じ読み取り結果になることを確認。外部通信 0 件。
+  - 埋め込みモデルの比較は `docs/埋め込みモデルの比較.md`。技術文書では EmbeddingGemma 2 が最良（41/48）、bge-m3 40、ruri 37。Wikipedia は 3 つとも 34/34。
+  - ruri の CLI とブラウザ版のベクトルが一致することを確認（コサイン 0.999 以上）。EmbeddingGemma 2 はブラウザでは動かない（落とし穴 7）。
+  - 以前の「29/34」は、`--llm-model` を付けないと LM Studio の一覧の最初のモデル（phi-4-mini-reasoning）が使われていたためと考えられる（コードと一覧の順から）。gemma-4-e2b を指定すると 34/34。
+- **2026-11-17 追加**：Excel の読み取りを作り直し（空欄・表示形式・結合セル）、CSV を表として読む、表を分けたときに列名の行を付け直す。
+  技術文書のテストセットに Excel の問題 9 問を追加（計 57 問、`C3-C4_コンデンサ受入評価.xlsx`）。直す前→後（gemma-4-e2b）：
+  EmbeddingGemma 2 は 47→50/57、ruri は 44→48/57。Excel の 9 問はどちらも 6→9。元の 48 問は 41→41 と 38→39（下がっていない）。
+  直す前は空欄で列がずれ、代替品の空欄に正規品の値（-0.128）を答えていた。Wikipedia の検索結果は変わらない（チャンク数も同じ 51）。
+- **未確認**：bge-m3 の CLI とブラウザ版のベクトル一致、実在のデータシート（フォントや表の形がさまざまな PDF）での読み取り品質。
 
 ## 次にやること
 1. GitHub にリポジトリを作って push。Settings → Pages を「GitHub Actions」にする（pages.yml が公開）。
@@ -81,7 +108,11 @@ Windows で Python を使うときは `PYTHONUTF8=1` を付ける（日本語の
 3. （済）Windows 実機で `rag.exe models / index / app` と、デスクトップ版の起動・終了を確認。
 4. 本物のモデルで、CLI（ネイティブ版）とブラウザ版のベクトルがほぼ一致し、検索結果が同じになるか確認（ダミーでは差が最大 0.0003）。
 5. 自動判定の改善：要点の語が含まれていても、答えが「判断できません」なら不正解にする（Q28 の誤判定。精度テスト画面と CLI の両方）。
+   あわせて「検索で答えが入った」の判定も、"2" のような短い数字は偶然一致しやすい（技術文書の Q22）ので見直す。
 6. 利用者の宿題：新しい版（追加プロンプトあり）で ruri と bge-m3 をもう一度評価し、CSV を比較。
+7. 技術文書ではハイブリッド検索が意味検索だけより悪い（docs/埋め込みモデルの比較.md の「気づいたこと」）。資料の種類や質問の言語で
+   重みを変える、英語の資料には質問を英語にも直して検索する、などを検討。
+8. `rag eval` で `--llm-model` を省いたとき、埋め込み用でないモデルの最初のものが選ばれる。gemma など回答向けのモデルを優先するか、使ったモデル名を必ず表示する。
 
 ## テストの仕方
 - 作業環境から HuggingFace に届かなかったため、`tests/make_dummy_models.py`（形だけのモデル）と `tests/make_standin_models.py`（本物と同じ層数・幅、重みは乱数）で検証した。

@@ -8,3 +8,4 @@ desktop/src-tauri/target/
 desktop/src-tauri/gen/
 *.part
 tests/models/
+.venv/

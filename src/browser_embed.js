@@ -11,8 +11,11 @@ const BrowserEmbed = (() => {
   const BASE = 'https://local-model.invalid/';          // 実在しないホスト。すべて localFetch で横取りする
   const HF = 'https://huggingface.co/';
   const RT = '_runtime/';
-  const RUNTIME = ['transformers.min.js', 'ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm'];
-  const MODEL_FILES = /^(config\.json|tokenizer\.json|tokenizer_config\.json|special_tokens_map\.json|1_Pooling\/config\.json|onnx\/[^/]+\.onnx(_data(_\d+)?)?)$/;
+  // 計算エンジンと PDF 読み込み（pdf.js・CMap）。並びは build.py の RT_FILES と同じ（HTML 内蔵の rt0, rt1, … に対応）
+  const RUNTIME = ['transformers.min.js', 'ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm',
+    'pdf.min.mjs', 'pdf.worker.min.mjs', 'cmaps.json'];
+  // 取り込むファイル。画像・音声用の部品（EmbeddingGemma 2 の vision/audio_encoder）は文章の検索に使わないので取り込まない
+  const MODEL_FILES = /^(config\.json|tokenizer\.json|tokenizer_config\.json|special_tokens_map\.json|1_Pooling\/config\.json|onnx\/(?!(audio|vision)_encoder)[^/]+\.onnx(_data(_\d+)?)?)$/;
   const DTYPE_SUFFIX = { '': 'fp32', '_fp16': 'fp16', '_quantized': 'q8', '_int8': 'int8', '_uint8': 'uint8', '_q4': 'q4', '_q4f16': 'q4f16', '_bnb4': 'bnb4' };
   const PREF = { webgpu: ['fp16', 'fp32', 'q4f16', 'q8', 'int8', 'uint8', 'q4', 'bnb4'], wasm: ['q8', 'int8', 'uint8', 'fp32', 'q4', 'bnb4', 'fp16', 'q4f16'] };
   // オンラインで取得できるモデル（ダウンロード量を抑えるため量子化版を優先）
@@ -20,6 +23,9 @@ const BrowserEmbed = (() => {
     { name: 'ruri-v3-30m', repo: 'sirasagi62/ruri-v3-30m-ONNX', size: '数十MB', dtypes: ['q8', 'fp32'] },
     { name: 'bge-m3', repo: 'Xenova/bge-m3', size: '約570MB', dtypes: ['q8', 'fp16'] }
   ];
+  // EmbeddingGemma 2 は、どの形式（q8・q4・fp16）も ONNX Runtime Web にない計算（GatherBlockQuantized）を使うため、ブラウザでは動かない
+  // （Transformers.js 4.3.2 / onnxruntime-web 1.31 で確認）。CLI・デスクトップ版（ネイティブ版エンジン）では動く。
+  const NO_BROWSER = /embeddinggemma-?2/i;
   const HF_CACHE = 'rag-hf-models';
 
   // ?offline / ?offline=1 でオフライン。?offline=0 なら明示的にオンライン。file:// は常にオフライン
@@ -114,10 +120,12 @@ const BrowserEmbed = (() => {
     for (const f of onnxFiles(name)) { const m = f.match(/^model(.*)\.onnx$/); if (m && DTYPE_SUFFIX[m[1]]) out.push(DTYPE_SUFFIX[m[1]]); }
     return out;
   }
-  function label(name) {
+  function label(name, inApp = false) {   // inApp：デスクトップ版（rag.exe）が計算するモデルの表示
     const n = name.toLowerCase();
     if (/ruri/.test(n)) return name + '（日本語特化・名古屋大）';
     if (/bge-m3/.test(n)) return name + '（高精度・多言語）';
+    if (NO_BROWSER.test(n) && !inApp) return name + '（ブラウザでは使えません）';
+    if (/embeddinggemma/.test(n)) return name + '（Google・多言語）';
     if (/e5/.test(n)) return name + '（多言語）';
     return name;
   }
@@ -252,8 +260,24 @@ const BrowserEmbed = (() => {
     return order.length ? order : [have[0] || 'fp32'];
   }
 
+  // ベクトル化の関数を用意する。普通のモデルは feature-extraction パイプライン。
+  // EmbeddingGemma 2 はパイプラインだと画像・音声の部品まで読み込むので、文章用の部品だけを読み込み、
+  // モデルが出す sentence_embedding（平均＋512→768 の変換済み）を使う。呼び方はパイプラインと同じにそろえる。
+  // （cli/src/embed.js にも同じ処理がある）
+  async function loadExtractor(L, id, opts) {
+    let cfg = null;
+    try { cfg = await L.AutoConfig.from_pretrained(id); } catch {}
+    if (!cfg || !(cfg.architectures || []).includes('EmbeddingGemma2Model')) return L.pipeline('feature-extraction', id, opts);
+    if (!globalThis.RAG_TRY_EG2) throw new Error('EmbeddingGemma 2 はブラウザでは動きません（計算エンジンが対応していないため）。CLI（rag.exe）かデスクトップ版を使ってください。');
+    cfg.vision_config = cfg.audio_config = null;
+    const tok = await L.AutoTokenizer.from_pretrained(id);
+    const model = await L.AutoModel.from_pretrained(id, { ...opts, config: cfg });
+    return async texts => (await model(await tok(texts, { padding: true, truncation: true, max_length: 2048 }))).sentence_embedding;
+  }
+
   async function getPipe(name, devicePref = 'auto') {
     await load();
+    if (NO_BROWSER.test(name) && !globalThis.RAG_TRY_EG2) throw new Error(`${name}（EmbeddingGemma 2）はブラウザでは動きません（計算エンジンが対応していないため）。CLI（rag.exe）かデスクトップ版を使ってください。`);
     if (!models().includes(name)) throw new Error(OFFLINE ? `モデル「${name}」が取り込まれていません（オフラインモード）` : `モデル「${name}」が見つかりません`);
     const dev = devicePref === 'auto' ? (await hasWebGPU() ? 'webgpu' : 'wasm') : devicePref;
     const key = name + '|' + dev;
@@ -267,7 +291,7 @@ const BrowserEmbed = (() => {
           const ext = !isOnlineModel(name) && files.has(`${name}/onnx/model${Object.keys(DTYPE_SUFFIX).find(k => DTYPE_SUFFIX[k] === dtype)}.onnx_data`);
           const opts = { device: dev, dtype };
           if (ext) opts.use_external_data_format = true;
-          const pipe = await L.pipeline('feature-extraction', id, opts);
+          const pipe = await loadExtractor(L, id, opts);
           return { pipe, device: dev, dtype, pooling: await poolingOf(name) };
         } catch (e) { lastErr = e; }
       }
@@ -305,13 +329,39 @@ const BrowserEmbed = (() => {
       const idx = order.slice(s, s + batch);
       const t = await P.pipe(idx.map(i => texts[i]), { pooling: P.pooling, normalize: true });
       const d = t.dims[t.dims.length - 1], data = t.data;
-      idx.forEach((i, n) => { out[i] = Float32Array.from(data.subarray(n * d, (n + 1) * d)); });
+      idx.forEach((i, n) => { out[i] = unit(Float32Array.from(data.subarray(n * d, (n + 1) * d))); });
       if (t.dispose) t.dispose();
       onProgress && onProgress(Math.min(s + batch, texts.length), texts.length);
       await new Promise(r => setTimeout(r, 0));   // 画面が固まらないよう一息つく
     }
     return out;
   }
+
+  // 長さ1にそろえる（パイプラインは正規化済みだが、モデルを直接呼んだときにも同じ扱いにするため）
+  function unit(v) {
+    let s = 0; for (let i = 0; i < v.length; i++) s += v[i] * v[i];
+    s = Math.sqrt(s); if (s > 0 && Math.abs(s - 1) > 1e-4) for (let i = 0; i < v.length; i++) v[i] /= s;
+    return v;
+  }
+
+  /* ---- PDF の読み込み（pdf.js）----
+   * Core.extractText が globalThis.RAG_PDF を呼ぶ。pdf.js の処理役（worker）は別スレッドにせず、この画面の中で動かす
+   * （file:// でも動き、外部から何も読み込まないため）。CMap（日本語などの文字の対応表）も同梱のものを使う。 */
+  let pdfP = null;
+  function pdfLoader() {
+    if (!pdfP) pdfP = (async () => {
+      await load();
+      const [js, wk, cm] = await Promise.all(['pdf.min.mjs', 'pdf.worker.min.mjs', 'cmaps.json'].map(runtimeBlob));
+      if (!js || !wk) throw new Error('PDFの読み込み機能（pdf.js）が見つかりません');
+      const imp = b => import(URL.createObjectURL(new Blob([b], { type: 'text/javascript' })));
+      globalThis.pdfjsWorker = await imp(wk);
+      const pdfjs = await imp(js);
+      const map = cm ? JSON.parse(await cm.text()) : {};
+      return { pdfjs, cmap: n => map[n] ? Uint8Array.from(atob(map[n]), c => c.charCodeAt(0)) : null };
+    })().catch(e => { pdfP = null; throw e; });
+    return pdfP;
+  }
+  if (typeof globalThis !== 'undefined') globalThis.RAG_PDF = pdfLoader;
 
   // モード切替用のURL（今のページの ?offline を付け外しする）
   function switchUrl(toOffline) {

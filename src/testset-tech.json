@@ -1,0 +1,933 @@
+{
+ "app": "rag-eval",
+ "version": 1,
+ "title": "技術文書（架空のセンサ基板 SN-200 と部品のデータシート・設計書・BOM・受入評価など 14 件。PDF/Word/Excel/PowerPoint/CSV/テキスト/Markdown/HTML）",
+ "license": "このリポジトリのために作った架空の資料です（実在の会社・製品とは関係ありません）。MIT License。",
+ "docs": [
+  {
+   "name": "AN-012_Input_Capacitor_Selection.pdf",
+   "text": "# p.1\n\n## AN-012: Input Capacitor Selection for the HZ-BK2405 Buck Converter\nApplication Note - Hoshizora Electronics - 2026-04\n\n## 1 Introduction\n\nThe HZ-BK2405 is a synchronous buck converter with an input range of 4.5 V to 28 V, an output current of up to 3 A and a fixed switching frequency of 500 kHz. Because a buck converter draws pulsed current from its input, the input capacitor must handle a large RMS ripple current. An undersized input capacitor causes excessive input voltage ripple, EMI problems and, in the worst case, overheating of the capacitor.\n\n## 2 Input RMS Ripple Current\n\nThe RMS current in the input capacitor is approximately I_RMS = I_OUT x sqrt(D x (1 - D)), where D = V_OUT / V_IN is the duty cycle. The ripple current is largest at D = 0.5, where I_RMS = I_OUT / 2.\n\nExample: V_IN = 12 V, V_OUT = 5.0 V, I_OUT = 2 A gives D = 0.417 and I_RMS = 2 x sqrt(0.417 x 0.583) = 0.99 A. Choose capacitors whose combined ripple current rating exceeds 1.0 A at the switching frequency.\n\n## 3 Recommended Capacitors\n\nWe recommend two 10 uF, 50 V, X7R ceramic capacitors in parallel (1210 size) placed within 3 mm of the VIN pin. Do not use Y5V or Z5U dielectrics: their capacitance drops by more than 80 % under DC bias and at temperature extremes. Note that the effective capacitance of X7R capacitors also decreases with DC bias: a 10 uF, 50 V, 1210 capacitor retains only about 60 % of its nominal value at 24 V.\n\n## 4 Input Filter Damping\n\nWhen the converter is supplied through a long cable (more than 1 m), the cable inductance and the low-ESR ceramic capacitors form a resonant circuit. A hot-plug event can then produce an input voltage spike of up to twice the supply voltage. To damp the resonance, add a 47 uF aluminium electrolytic capacitor with an ESR of about 0.3 ohm in parallel with the ceramic capacitors. For 24 V systems, use a TVS diode with a standoff voltage of 26 V or higher at the input connector.\n\n## 5 Layout Checklist\n\n- Place the ceramic input capacitors within 3 mm of the VIN and PGND pins.\n- Keep the loop formed by the input capacitor, the high-side switch and PGND as small as possible.\n- Use at least four thermal vias under the exposed pad.\n- Keep the feedback trace away from the switch node (SW).\n\n## 6 Summary\n\nUse at least 20 uF of X7R ceramic capacitance rated for 50 V, check the RMS ripple current, and add a damped electrolytic capacitor when long input cables are used.\n\nHoshizora Electronics AN-012 Rev.1\t1"
+  },
+  {
+   "name": "C3-C4_コンデンサ受入評価.xlsx",
+   "text": "# シート: 比較\nC3, C4 用 積層セラミックコンデンサ 受入評価\n評価者：鈴木（製造技術）　目的：代替品 GR-1210-106-50 を正規品の代わりに使えるか確認する\n\n区分\t項目\t条件\tCM32X7R106K50（正規品）\tGR-1210-106-50（代替品）\t単位\t備考\n静電容量\t静電容量\tDC 0V、25℃\t10.1\t9.8\tμF\n静電容量\t静電容量\tDC 12V\t6.9\t6.1\tμF\n静電容量\t静電容量\tDC 24V\t5.8\t4.7\tμF\t代替品は 24V で実効容量が 5μF を下回る\n静電容量\t容量変化率\tDC 24V（0V 比）\t-42.6%\t-52.0%\n損失\tESR\t500kHz\t3.1\t\tmΩ\t代替品は未測定（測定器の手配待ち）\n損失\t許容リップル電流\t500kHz、温度上昇 20℃\t4.2\t3.6\tArms\n調達\t単価\t1,000 個購入時\t¥31\t¥24\n調達\t納期\t\t8 週\t3 週\n評価\t評価日\t\t2026-09-10\t2026-09-12\n評価\t判定\t\t合格\t条件付き合格\t\t24V 系で使う場合は 3 個並列にすること\n\n温度特性（DC 0V、25℃ 比の容量変化率）\n温度（℃）\t正規品\t代替品\n-40\t-8.1%\t-9.3%\n-20\t-4.2%\t-4.9%\n25\t0.0%\t0.0%\n85\t-6.7%\t-9.4%\n125\t-12.8%\n"
+  },
+  {
+   "name": "HZ-LDO33A_データシート.pdf",
+   "text": "# p.1\n\n## HZ-LDO33A\n低損失 3.3V 出力 リニアレギュレータ（500mA） データシート Rev.1.1\n\n## 概要\n\nHZ-LDO33A は、最大 500mA を出力できる低損失（低ドロップアウト）の 3.3V固定出力リニアレギュレータです。無負荷時の消費電流が 35μA（標準）と小さく、電池駆動や常時通電のセンサ機器に適しています。出力コンデンサにはセラミックコンデンサ（2.2μF以上）を使用できます。過電流保護と過熱保護を内蔵しています。\n\n## 特長\n\n・入力電圧範囲：3.6V～16V ・出力電圧精度：±1%（Ta=25℃）\n・ドロップアウト電圧：250mV（標準、IOUT=300mA）\n・無負荷時消費電流：35μA（標準） ・スタンバイ電流：0.1μA（標準、EN=0V）\n・パッケージ：SOT-89-5、DFN-6（2mm×2mm） ・動作周囲温度：-40℃～105℃\n\n## 用途\n\n産業用センサノード、スマートメータ、電池駆動機器、マイコンの電源。\n\n## 絶対最大定格\n\n絶対最大定格を超える条件では、一瞬でも IC が破壊するおそれがあります。（Ta=25℃）\n\n項目\t記号\t定格\t単位\n入力電圧\tVIN\t-0.3～18\tV\nEN 端子電圧\tVEN\t-0.3～VIN+0.3（最大 18）\tV\n出力電圧\tVOUT\t-0.3～6.0\tV\n許容損失（SOT-89-5）\tPd\t1.2\tW\n許容損失（DFN-6）\tPd\t1.9\tW\n接合部温度\tTj\t150\t℃\n保存温度\tTstg\t-55～150\t℃\n\n## 推奨動作条件\n\n項目\t記号\t最小\t最大\t単位\n入力電圧\tVIN\t3.6\t16\tV\n出力電流\tIOUT\t0\t500\tmA\n動作周囲温度\tTa\t-40\t105\t℃\n出力コンデンサ容量\tCOUT\t2.2\t－\tμF\n出力コンデンサの ESR\tESR\t0.001\t0.5\tΩ\n\n# 推奨動作条件（p.2）\n\n## 電気的特性\n\n特に指定のない限り Ta=25℃、VIN=5.0V、IOUT=1mA、CIN=COUT=2.2μF（セラミック）。\n\n項目\t記号\t条件\t最小\t標準\t最大\t単位\n出力電圧\tVOUT\tIOUT=1mA\t3.267\t3.300\t3.333\tV\n入力安定度\tΔVOUT/ΔVIN\tVIN=4.0V～16V\t－\t0.02\t0.1\t%/V\n負荷安定度\tΔVOUT\tIOUT=1mA～500mA\t－\t10\t30\tmV\nドロップアウト電圧\tVDO\tIOUT=300mA\t－\t250\t400\tmV\nドロップアウト電圧\tVDO\tIOUT=500mA\t－\t420\t650\tmV\n無負荷時消費電流\tIQ\tIOUT=0mA\t－\t35\t60\tμA\nスタンバイ電流\tISTB\tEN=0V\t－\t0.1\t1.0\tμA\n電流制限\tILIM\tVOUT=3.0V\t550\t800\t－\tmA\n短絡電流\tISC\tVOUT=0V\t－\t150\t－\tmA\nリップル除去率\tPSRR\tf=1kHz、IOUT=50mA\t－\t70\t－\tdB\n出力雑音電圧\tVN\tf=10Hz～100kHz\t－\t45\t－\tμVrms\nEN 端子 H しきい値\tVENH\t1.2\t－\t－\tV\nEN 端子 L しきい値\tVENL\t－\t－\t0.4\tV\n過熱保護 検出温度\tTSD\tTj\t－\t160\t－\t℃\n過熱保護 ヒステリシス\tTSDH\tTj\t－\t20\t－\t℃\n\n## 熱特性\n\nパッケージ\t熱抵抗 θja（接合部－周囲）\t条件\nSOT-89-5\t104 ℃/W\tJEDEC 4層基板\nDFN-6（2mm×2mm）\t65 ℃/W\tJEDEC 4層基板、裏面パッドをはんだ付け\n損失の計算：Pd =（VIN － VOUT）× IOUT。例えば VIN=5.0V、IOUT=150mA のとき Pd = 1.7V × 0.15A = 0.255W となり、SOT-89-5 では接合部温度の上昇は約 27℃ です（θja=104℃/W）。周囲温度 70℃ でも Tj は約97℃ で、過熱保護（160℃）には達しません。\n\n## 使用上の注意\n\n・出力コンデンサは IC の出力端子の近く（5mm 以内）に配置してください。2.2μF未満では発振するおそれがあります。\n・入力側にも 1μF 以上のコンデンサを配置してください。入力配線が 10cm を超える場合は 2.2μF以上を推奨します。\n・EN 端子を使わない場合は VIN に接続してください（開放禁止）。\n\n## 型番の構成\n\n型番\tパッケージ\t梱包\t最小発注単位\nHZ-LDO33A-S5\tSOT-89-5\tテープ＆リール\t3,000 個\nHZ-LDO33A-D6\tDFN-6（2mm×2mm）\tテープ＆リール\t5,000 個\n\n## 改版履歴\n\n版\t日付\t内容\nRev.1.0\t2024-03-15\t初版\nRev.1.1\t2025-06-02\tドロップアウト電圧（IOUT=500mA）の最大値を 600mV から 650mV に変更。DFN-6 の熱抵抗を追記。"
+  },
+  {
+   "name": "HZ-N6030_MOSFET_データシート.pdf",
+   "text": "# p.1\n\n## HZ-N6030\nNチャネル パワーMOSFET 60V / 30A （N-channel Power MOSFET） データシート Rev.2.0\n\n## 特長 Features\n\n・低オン抵抗：RDS(on) = 9.5mΩ（標準、VGS=10V）\n・4.5V ゲート駆動に対応（ロジックレベル）\n・アバランシェ耐量保証：EAS = 45mJ\n・パッケージ：TO-252（DPAK）、鉛フリー・RoHS 対応\n\n## 用途 Applications\n\nDC-DC コンバータ、モータ駆動、電源の逆接続保護、負荷スイッチ。\n\n## 絶対最大定格 Absolute Maximum Ratings（Tc=25℃）\n\n項目 Parameter\t記号\t定格\t単位\nドレイン・ソース間電圧\tVDSS\t60\tV\nゲート・ソース間電圧\tVGSS\t±20\tV\nドレイン電流（連続）Tc=25℃\tID\t30\tA\nドレイン電流（連続）Tc=100℃\tID\t21\tA\nドレイン電流（パルス）\tIDP\t120\tA\nアバランシェエネルギー（単発）\tEAS\t45\tmJ\n許容損失 Tc=25℃\tPD\t50\tW\nチャネル温度\tTch\t175\t℃\n保存温度\tTstg\t-55〜175\t℃\n\n## 熱抵抗 Thermal Resistance\n\n項目\t記号\t最大\t単位\nチャネル−ケース間\tRθjc\t2.5\t℃/W\nチャネル−周囲間（基板実装）\tRθja\t50\t℃/W\n\n# 熱抵抗 Thermal Resistance（p.2）\n\n## 電気的特性 Electrical Characteristics（Tc=25℃）\n\n項目\t記号\t条件\t最小\t標準\t最大\t単位\nドレイン・ソース間降伏電圧 V(BR)DSS\tID=250μA, VGS=0V\t60\t—\t—\tV\nゲートしきい値電圧\tVGS(th)\tVDS=VGS, ID=250μA\t1.2\t1.8\t2.5\tV\nドレイン遮断電流\tIDSS\tVDS=60V, VGS=0V\t—\t—\t1\tμA\nゲート漏れ電流\tIGSS\tVGS=±20V\t—\t—\t±100\tnA\nオン抵抗\tRDS(on)\tVGS=10V, ID=15A\t—\t9.5\t12\tmΩ\nオン抵抗\tRDS(on)\tVGS=4.5V, ID=10A\t—\t14\t19\tmΩ\n入力容量\tCiss\tVDS=30V, f=1MHz\t—\t1050\t—\tpF\n出力容量\tCoss\tVDS=30V, f=1MHz\t—\t210\t—\tpF\n総ゲート電荷量\tQg\tVGS=10V, VDS=30V, ID=15A\t—\t18\t26\tnC\nターンオン遅延時間\ttd(on)\tVDD=30V, ID=15A\t—\t9\t—\tns\nターンオフ遅延時間\ttd(off)\tVDD=30V, ID=15A\t—\t22\t—\tns\nダイオード順電圧\tVSD\tIS=15A, VGS=0V\t—\t0.88\t1.2\tV\n逆回復時間\ttrr\tIS=15A, di/dt=100A/μs\t—\t28\t—\tns\n\n## 注記 Notes\n\n1. パルス幅 300μs 以下、デューティ 2% 以下で測定。\n2. RDS(on) は温度とともに増加し、Tch=125℃ では 25℃ のときの約 1.7 倍になります。\n3. Rθja は 40mm×40mm、銅箔厚 70μm の FR-4 基板に実装した場合の値です。\n\n## 改版履歴 Revision History\n\n版\t日付\t内容\nRev.1.0\t2023-09-01\t初版\nRev.2.0\t2025-02-10\t製造拠点の変更に伴い Qg の最大値を 30nC から 26nC に変更。EAS を 40mJ から 45mJ に変更。"
+  },
+  {
+   "name": "HZ-TS20_Datasheet.pdf",
+   "text": "# p.1\n\n## HZ-TS20\nDigital Temperature Sensor with I2C Interface, +/-0.2 °C Accuracy - Datasheet Rev. B\n\n## 1 Features\n\n- Accuracy: +/-0.2 °C (max) from -10 °C to +85 °C; +/-0.5 °C (max) from -40 °C to +125 °C\n- 16-bit resolution: 0.0078125 °C (1 LSB)\n- Supply voltage: 1.7 V to 5.5 V\n- Low power: 3.5 μA average at 1 Hz conversion rate; 0.15 μA in shutdown\n- I2C / SMBus compatible interface, up to 1 MHz (Fast-mode Plus)\n- Four selectable addresses (ADD0 pin)\n- Programmable ALERT output (open-drain)\n- Packages: SOT-563 (1.6 mm x 1.6 mm), WSON-6 (2 mm x 2 mm)\n\n## 2 Applications\n\nIndustrial sensor nodes, cold-chain loggers, battery thermal monitoring, PC and server thermal management.\n\n## 3 Description\n\nThe HZ-TS20 is a digital temperature sensor that converts the die temperature into a 16-bit two's-complement value. Each conversion takes 15.5 ms (typical). Between conversions the device enters a low-power standby state. Place the sensor away from heat sources such as linear regulators; a distance of at least 10 mm is recommended to keep the self-heating error from nearby components below 0.1 °C.\n\n## 4 Electrical Characteristics\n\nTA = 25 °C, VDD = 3.3 V, unless otherwise noted.\n\nParameter\tTest conditions\tMin\tTyp\tMax\tUnit\nTemperature accuracy\t-10 to +85 C\t-0.2\t+/-0.1\t0.2\tC\nTemperature accuracy\t-40 to +125 C\t-0.5\t+/-0.25\t0.5\tC\nResolution\t0.0078125\tC\nSupply voltage (VDD)\t1.7\t3.3\t5.5\tV\nAverage supply current\t1 Hz conversion\t3.5\t5.0\tuA\nActive current\tDuring conversion\t135\t200\tuA\nShutdown current\t0.15\t0.5\tuA\nConversion time\t15.5\t17.5\tms\nI2C clock frequency\t0.001\t1000\tkHz\nALERT output low voltage\tIOL = 3 mA\t0.4\tV\n\n## 5 I2C Address Selection\n\nADD0 pin connection\t7-bit address\nGND\t0x48\nVDD\t0x49\nSDA\t0x4A\nSCL\t0x4B\n\n# 5 I2C Address Selection（p.2）\n\n## 6 Register Map\n\nAddress\tName\tReset value\tDescription\n0x00\tTEMP_RESULT\t0x8000\tLatest conversion result (16-bit, two's complement)\n0x01\tCONFIG\t0x0220\tConversion mode, averaging, alert mode\n0x02\tT_HIGH\t0x6000\tHigh limit (192 C)\n0x03\tT_LOW\t0x8000\tLow limit (-256 C)\n0x0F\tDEVICE_ID\t0x2012\tDevice identification\n\n## 7 Temperature Data Format\n\nThe temperature in degrees Celsius is TEMP_RESULT x 0.0078125. For example, 0x0C80 (3200) corresponds to 25.0 °C, and 0xFF80 (-128) corresponds to -1.0 °C. The value 0x8000 is returned before the first conversion completes.\n\n## 8 Configuration Register (0x01)\n\nBits\tField\tDescription\n11:10\tMOD\t00 = continuous conversion, 01 = shutdown, 11 = one-shot\n9:7\tCONV\tConversion cycle: 000 = 15.5 ms ... 100 = 1 s (default) ... 111 = 16 s\n6:5\tAVG\tAveraging: 00 = none, 01 = 8 (default), 10 = 32, 11 = 64\n4\tT/nA\t0 = alert mode, 1 = therm (comparator) mode\n\n## 9 Layout Guidelines\n\nPlace a 0.1 μF decoupling capacitor as close as possible to the VDD pin. Connect the exposed pad (WSON-6 only) to GND. Use 10 kΩ pull-up resistors on SDA, SCL and ALERT when the bus capacitance is below 100 pF.\n\n## 10 Ordering Information\n\nPart number\tPackage\tPacking\tMOQ\nHZ-TS20-DRL\tSOT-563\tTape and reel\t4,000\nHZ-TS20-DSG\tWSON-6\tTape and reel\t3,000\n\n## 11 Revision History\n\nRev. A (2025-01-20): Initial release. Rev. B (2025-11-04): Added WSON-6 package; changed typical active current from 150 uA to 135 uA."
+  },
+  {
+   "name": "SN-200_BOM.xlsx",
+   "text": "# シート: BOM\nSN-200 部品表（BOM）　版：C　更新日：2026-07-30\n\nNo\t部品番号\t品名\t型番\tメーカー\t数量\t単価（円）\t備考\n1\tU1\tマイコン\tHZ-M4F128\tホシゾラ電子\t1\t420\n2\tU2\t3.3V LDO\tHZ-LDO33A-S5\tホシゾラ電子\t1\t38\tSOT-89-5\n3\tU3\t降圧 DC-DC\tHZ-BK2405\tホシゾラ電子\t1\t165\n4\tU4\t温度センサ\tHZ-TS20-DRL\tホシゾラ電子\t1\t210\tI2C 0x49\n5\tU5\tRS-485 トランシーバ\tHZ-RS485H\tホシゾラ電子\t1\t95\n6\tQ1\tNch MOSFET\tHZ-N6030\tホシゾラ電子\t1\t48\t逆接続保護\n7\tD5\tTVS ダイオード\tHZ-TVS712\tホシゾラ電子\t1\t22\tRS-485 ESD 対策（DR2 で追加）\n8\tC3, C4\tセラミックコンデンサ\tCM32X7R106K50\tアオイ電子部品\t2\t31\t10μF 50V X7R 1210\n9\tC5\tアルミ電解コンデンサ\tAE-47U35V\tアオイ電子部品\t1\t18\t47μF 35V 低 ESR\n10\tC12\tセラミックコンデンサ\tCM21X5R106M16\tアオイ電子部品\t1\t9\t10μF 16V X5R 0805\n11\tR10\tチップ抵抗\tRC16-121J\tアオイ電子部品\t1\t1\t120Ω 終端抵抗\n12\tJP2\tジャンパピン\tJP-2P-254\tコハク工業\t1\t6\t終端抵抗の切替\n13\tCN1\tターミナルブロック 2P\tTB-508-2P\tコハク工業\t1\t54\t電源入力\n14\tCN2\tターミナルブロック 3P\tTB-508-3P\tコハク工業\t1\t66\tRS-485\n15\tPCB\tプリント基板\tHZ-SN200-PCB-C\t共栄プリント\t1\t380\t4層 80×50mm\n\n\t\t\t\t\t合計\t1,594\t主要部品のみ（受動部品の一部は省略）\n\n# シート: 変更履歴\n版\t日付\t変更内容\t理由\nA\t2026-04-12\t初版\nB\t2026-06-25\tD5（HZ-TVS712）を追加\tDR2 指摘 #2（RS-485 の ESD 対策）\nC\t2026-07-30\tC12 を 22μF（CM21X7R226M10）から 10μF（CM21X5R106M16）に変更\t22μF の部品の納期が 26 週と長いため\n\n# シート: 代替部品\n部品番号\t正規品\t代替品\t条件\nQ1\tHZ-N6030\tHZ-N6040\tVDSS 60V 以上・RDS(on) 15mΩ 以下であれば可\nC3, C4\tCM32X7R106K50\tGR-1210-106-50\t50V・X7R に限る\nU4\tHZ-TS20-DRL\t（なし）\t代替品なし。精度の要求を満たす品がないため\n"
+  },
+  {
+   "name": "SN-200_DR2_設計レビュー.pptx",
+   "text": "# スライド1\nSN-200 設計レビュー（DR2）\n2026-06-12　第二設計部　出席：佐藤（設計）、田中（品証）、鈴木（製造技術）、山本（購買）\n\n# スライド2\n指摘事項 #1：LDO の発熱\n3.3V 系の最大負荷 150mA で LDO の損失は 0.255W\nSOT-89-5（θja 104℃/W）で温度上昇は約 27℃。周囲 70℃ でも Tj 約 97℃\n判定：問題なし（対策不要）\n\n# スライド3\n指摘事項 #2：RS-485 の ESD 対策\n盤内配線は長く、静電気・サージが入りやすい\n対策：CN2 の近くに TVS ダイオード D5（HZ-TVS712）を追加する\n担当：佐藤　期限：2026-06-26\n\n# スライド4\n指摘事項 #3：温度センサの配置\nDR1 の配置では U4 が LDO（U2）から 6mm で、自己発熱の影響を受ける\nデータシートの推奨は 10mm 以上\n対策：U4 を基板の端に移動し、スリットを入れる（担当：佐藤）\n\n# スライド5\n決定事項\n量産試作は 2026 年 7 月に 50 台で行う\n目標原価は 1 台あたり 4,800 円（基板・部品・実装を含む）\n次回 DR3 は量産試作の評価後（2026 年 9 月予定）\n\n# スライド6\n宿題\n購買（山本）：C12（22μF）の納期を確認する\n品証（田中）：出荷検査の判定基準案を作成する（7 月末まで）\n製造技術（鈴木）：検査治具 JIG-485-02 を手配する\n"
+  },
+  {
+   "name": "SN-200_Firmware_Release_Notes.docx",
+   "text": "\n# SN-200 Firmware Release Notes\nHoshizora Electronics - Embedded Software Team\n\n# Version 2.3.0 (2026-10-02)\nNew features\nSET_INTERVAL now accepts intervals from 1 s to 3600 s (previously 10 s to 3600 s).\nAdded the GET_VERSION response field \"build date\".\nBug fixes\nFixed a CRC error that occurred when a frame contained exactly 256 bytes of payload.\nFixed incorrect negative temperatures below -10 C (sign extension error).\nKnown issues\nGET_VOLT returns 0 during the first 2 seconds after power-on, until the ADC calibration completes.\n\n# Version 2.2.1 (2026-07-15)\nReduced the average current consumption by 1.5 mA by putting the RS-485 transceiver into standby between transmissions.\nChanged the default measurement interval from 30 s to 60 s.\n\n# Upgrade procedure\nConnect the SWD debugger to CN3 and write the firmware image sn200_fw_v2.3.0.hex. Settings stored in flash (address, interval, baud rate) are kept. Firmware version 2.0 or later is required before updating; devices with version 1.x must first be updated to 2.0."
+  },
+  {
+   "name": "SN-200_ハードウェア設計仕様書.docx",
+   "text": "\n# SN-200 ハードウェア設計仕様書\n文書番号：HZ-SN200-HW-001　版：Rev.2.1　発行日：2026-08-20　作成：第二設計部 佐藤\n\n# 1. 概要\nSN-200 は工場設備の温度を監視するセンサノード基板である。温度センサの値を RS-485 で上位の収集装置に送る。設置場所は制御盤の中を想定し、DC 24V または DC 12V の盤内電源から給電する。\n\n# 2. 主な仕様\n\n項目\t仕様\n入力電圧\tDC 9V〜24V（逆接続保護あり）\n消費電流\t平均 18mA 以下（DC 12V 入力、送信間隔 60 秒）\n動作温度範囲\t-20℃〜70℃\n保存温度範囲\t-40℃〜85℃\n通信\tRS-485（半二重）、最大 115200bps、最大 32 台をマルチドロップ接続\n温度測定範囲\t-20℃〜70℃（基板上の温度センサ）\n温度測定精度\t±0.5℃（-20℃〜70℃）\n外形寸法\t80mm × 50mm、厚さ 1.6mm（4層基板）\n\n\n# 3. 電源構成\n入力（CN1）から逆接続保護用の MOSFET（Q1：HZ-N6030）を通し、降圧 DC-DC コンバータ（U3：HZ-BK2405）で 5.0V を作る。5.0V から LDO（U2：HZ-LDO33A）で 3.3V を作り、マイコン・温度センサ・RS-485 トランシーバに供給する。3.3V 系の最大負荷電流は 150mA と見積もった。このとき LDO の損失は (5.0V − 3.3V) × 0.15A = 0.255W である。\nLDO の出力コンデンサ C12 は 22μF（セラミック、X7R、10V）とする。データシートの最小値 2.2μF に対し、マイコンの起動時の突入電流による電圧降下を抑えるために大きめの値とした。\nDC-DC コンバータの入力コンデンサは、アプリケーションノート AN-012 に従い 10μF / 50V / X7R を 2 個並列とする（C3、C4）。さらに盤内の長い電源配線を考慮し、47μF のアルミ電解コンデンサ（C5）を追加する。\n\n# 4. 主要部品\n\n部品番号\t機能\t型番\t備考\nU1\tマイコン\tHZ-M4F128\tCortex-M4、Flash 128KB、RAM 32KB\nU2\t3.3V LDO\tHZ-LDO33A-S5\tSOT-89-5\nU3\t降圧 DC-DC\tHZ-BK2405\t500kHz、最大 3A\nU4\t温度センサ\tHZ-TS20-DRL\tI2C アドレス 0x49（ADD0 を VDD に接続）\nU5\tRS-485 トランシーバ\tHZ-RS485H\t3.3V 動作、ESD ±15kV\nQ1\t逆接続保護\tHZ-N6030\tNch MOSFET、ローサイドに配置\n\n\n# 5. 温度センサの配置\n温度センサ U4 は、LDO（U2）など発熱する部品から 10mm 以上離して配置する（HZ-TS20 データシートの推奨による）。SN-200 では U2 から 14mm の位置に配置した。基板の縁にスリットを設け、基板の熱が伝わりにくくしている。\n\n# 6. 通信\nRS-485 の終端抵抗 120Ω（R10）はジャンパ JP2 で接続・切り離しを切り替える。伝送路の両端の機器のみ JP2 をショートする。既定の通信速度は 115200bps、データ形式は 8N1 とする。コマンドの詳細は「UART コマンド仕様」を参照。\n\n# 7. コネクタ\n\nコネクタ\t用途\tピン配置\nCN1\t電源入力\t1: +V（9〜24V）、2: GND\nCN2\tRS-485\t1: A（+）、2: B（−）、3: GND\nCN3\tデバッグ（SWD）\t1: 3.3V、2: SWDIO、3: SWCLK、4: GND、5: NRST\n\n\n# 8. 改版履歴\n\n版\t日付\t内容\nRev.1.0\t2026-04-10\t初版\nRev.2.0\t2026-06-20\tDR2 の指摘を反映（TVS ダイオード D5 の追加、温度センサの配置変更）\nRev.2.1\t2026-08-20\t消費電流の目標を 20mA から 18mA に変更\n"
+  },
+  {
+   "name": "SN-200_出荷検査手順書.docx",
+   "text": "\n# SN-200 出荷検査手順書\n文書番号：HZ-SN200-QA-003　版：Rev.1.3　発行日：2026-10-01　品質保証課\n\n# 1. 目的\nSN-200 の出荷前に、全数に対して電気的な機能を確認する手順を定める。\n\n# 2. 使用機材\n直流安定化電源（12V 設定、電流制限 200mA）、デジタルマルチメータ、RS-485 ループバック治具（JIG-485-02）、基準温度計（校正済み、精度 ±0.1℃）、検査用 PC（検査ソフト SN-TEST v1.4）\n\n# 3. 手順\n外観を確認する（はんだブリッジ、部品の欠品・向き）。\nジャンパ JP2（終端抵抗）の設定が出荷指示書のとおりか確認する。指示がない場合はオープン（終端なし）とする。\nCN1 に 12V を加え、入力電流を測定する（待機時）。\n3.3V と 5V のテストポイント（TP1、TP2）の電圧を測定する。\n検査ソフトで RS-485 ループバック試験を行う（115200bps、1000 フレーム）。\n温度センサの読み値を基準温度計と比較する（室温、5 分以上なじませてから）。\n結果を検査記録に入力し、合格品に検査済みシールを貼る。\n\n# 4. 判定基準\n\n検査項目\t判定基準\n3.3V 出力（TP1）\t3.25V〜3.35V\n5V 出力（TP2）\t4.85V〜5.15V\n待機時の入力電流（12V 入力）\t25mA 以下\nRS-485 ループバック\t1000 フレームでエラー 0\n温度センサの誤差\t基準温度計との差が ±0.5℃ 以内\n\n\n# 5. 不合格時の処置\n不合格品には赤色の不良タグを付けて隔離棚に置き、当日中に品質保証課へ不具合票で報告する。再検査は修理後に全項目を行う。\n\n# 6. 改版履歴\n\n版\t日付\t内容\nRev.1.2\t2026-07-01\t温度センサの比較手順を追加\nRev.1.3\t2026-10-01\t不具合報告 FR-2026-031 を受け、手順 2（JP2 の確認）を追加\n"
+  },
+  {
+   "name": "SN-200_温度試験結果.csv",
+   "text": "温度(℃)\t試料\t3.3V出力(V)\t5V出力(V)\t消費電流(mA)\t温度センサ誤差(℃)\t判定\n-20\t#1\t3.302\t5.01\t17.2\t-0.21\t合格\n-20\t#2\t3.299\t5.00\t17.5\t-0.18\t合格\n-20\t#3\t3.301\t5.02\t17.1\t-0.25\t合格\n0\t#1\t3.301\t5.01\t16.8\t-0.08\t合格\n0\t#2\t3.300\t5.00\t17.0\t-0.05\t合格\n0\t#3\t3.300\t5.01\t16.9\t-0.11\t合格\n25\t#1\t3.300\t5.00\t16.5\t+0.03\t合格\n25\t#2\t3.299\t4.99\t16.6\t+0.06\t合格\n25\t#3\t3.300\t5.00\t16.4\t+0.02\t合格\n50\t#1\t3.298\t4.99\t16.9\t+0.18\t合格\n50\t#2\t3.297\t4.99\t17.1\t+0.31\t合格\n50\t#3\t3.298\t5.00\t16.8\t+0.15\t合格\n70\t#1\t3.296\t4.98\t17.6\t+0.34\t合格\n70\t#2\t3.295\t4.98\t17.9\t+0.62\t不合格\n70\t#3\t3.297\t4.99\t17.4\t+0.29\t合格"
+  },
+  {
+   "name": "UART_コマンド仕様.md",
+   "text": "# SN-200 UART コマンド仕様\n\nSN-200 と上位の収集装置は、RS-485 上で次のフレーム形式のコマンドをやりとりする。\n文書番号：HZ-SN200-FW-010　版：1.2（ファームウェア v2.3.0 に対応）\n\n## 通信設定\n\n- 通信速度：115200bps（既定）。SET_BAUD で 9600 / 19200 / 57600 / 115200bps に変更できる\n- データ形式：8 ビット、パリティなし、ストップビット 1（8N1）\n- 応答待ち時間：上位装置は 100ms 以内に応答がなければ再送する（最大 3 回）\n\n## フレーム形式\n\n| 項目 | 長さ | 内容 |\n|---|---|---|\n| STX | 1 バイト | 0x02 |\n| ADDR | 1 バイト | 機器アドレス（1〜32。0 は全機器あて） |\n| LEN | 1 バイト | CMD と DATA の合計バイト数 |\n| CMD | 1 バイト | コマンド番号 |\n| DATA | 0〜250 バイト | コマンドごとのデータ |\n| CRC | 2 バイト | CRC-16/CCITT（多項式 0x1021、初期値 0xFFFF）。ADDR から DATA までを計算。上位バイトが先 |\n| ETX | 1 バイト | 0x03 |\n\n## コマンド一覧\n\n| CMD | 名前 | 要求データ | 応答データ |\n|---|---|---|---|\n| 0x10 | GET_TEMP | なし | 温度（int16、0.01℃ 単位。例：2534 → 25.34℃） |\n| 0x11 | GET_VOLT | なし | 入力電圧（uint16、mV 単位） |\n| 0x20 | SET_INTERVAL | 測定間隔（uint16、秒。1〜3600、既定 60） | なし |\n| 0x21 | SET_BAUD | 0=9600、1=19200、2=57600、3=115200 | なし（応答後に切り替え） |\n| 0x30 | RESET | なし | なし（応答後に再起動） |\n| 0x7F | GET_VERSION | なし | ファームウェアの版（例：\"2.3.0\"）とビルド日 |\n\n## エラー応答\n\nエラーのときは CMD に 0xEE を入れ、DATA の 1 バイト目にエラーコードを入れて返す。\n\n| エラーコード | 意味 |\n|---|---|\n| 0xE1 | CRC エラー |\n| 0xE2 | 未対応のコマンド |\n| 0xE3 | パラメータが範囲外（例：SET_INTERVAL に 0 や 3601 を指定） |\n| 0xE4 | 処理中（測定中のため受け付けられない） |\n\n## 注意\n\n- 全機器あて（ADDR=0）のコマンドには応答しない。\n- ファームウェア v2.2 以前では SET_INTERVAL の最小値は 10 秒。\n"
+  },
+  {
+   "name": "コンデンサ選定基準.html",
+   "text": "\nコンデンサ選定基準\n\n# 社内設計基準：コンデンサの選定\n\n基準番号：DS-CAP-002　改訂：2025-12-01　設計標準化委員会\n\n## 1. 定格電圧のディレーティング\n\nセラミックコンデンサは、定格電圧が使用電圧の 2 倍以上のものを選ぶ。電源の入力など、サージが入るおそれのある箇所では 2.5 倍以上とする。\n\nアルミ電解コンデンサは、定格電圧が使用電圧の 1.25 倍以上のものを選ぶ。\n\n## 2. 誘電体の種類\n\n電源ラインには X7R または X5R を使う。Y5V・Z5U は使用禁止（温度と DC バイアスで容量が大きく減るため）。\n\n周囲温度が 70℃ を超える場所、または 85℃ を超えて使う部品には X7R を使う（X5R の上限は 85℃）。\n\nタンタルコンデンサは、突入電流で短絡故障するおそれがあるため、電源の入力側には使わない。\n\n## 3. DC バイアス特性の確認\n\nセラミックコンデンサは直流電圧をかけると実効容量が減る。メーカーのシミュレーションツールで実効容量を確認し、必要な容量の 1.5 倍以上の実効容量を確保すること。\n\n## 4. アルミ電解コンデンサの寿命\n\n項目\t基準\n\n寿命の計算\t周囲温度が 10℃ 下がるごとに寿命は 2 倍になる（10℃2倍則）\n\n必要な寿命\t製品の設計寿命（SN-200 は 10 年）以上\n\n推奨品\t105℃・2000 時間品以上\n\n例：105℃・2000 時間品を周囲 65℃ で使う場合、寿命は 2000 × 24 = 32000 時間（約 3.7 年）。10 年が必要な場合は 105℃・10000 時間品を選ぶか、温度を下げる。\n\n## 5. 承認\n\nこの基準から外れる部品を使う場合は、設計審査（DR）で承認を得ること。\n\n"
+  },
+  {
+   "name": "不具合報告_FR-2026-031.txt",
+   "text": "不具合報告書　FR-2026-031\r\n\r\n件名：高温試験で RS-485 の通信エラーが発生する\r\n発生日：2026-09-18\r\n報告者：品質保証課 田中\r\n対象：SN-200 量産試作品（ロット 2607、シリアル 0012～0019）\r\n重要度：B（出荷前に対策が必要）\r\n\r\n■ 現象\r\n恒温槽 70℃ での連続通信試験（ケーブル長 50m、115200bps）で、通信エラー率が約 2% になった。\r\n25℃ ではエラーは発生しなかった。8 台中 3 台で発生。\r\n\r\n■ 調査結果\r\n1. エラーが出た 3 台は、ジャンパ JP2（終端抵抗 120Ω）がショートされていなかった（終端なし）。\r\n2. 伝送路の末端の機器で終端がないため信号が反射し、高温でトランシーバのしきい値がずれてエラーになったと考えられる。\r\n3. JP2 をショートすると、70℃・50m・115200bps でエラー 0（1 万フレーム）になった。\r\n4. 回路・部品の不良はなかった。\r\n\r\n■ 原因\r\n出荷時の JP2 の設定が作業者任せになっており、出荷検査で確認していなかった。\r\n\r\n■ 対策\r\n・出荷検査手順書を Rev.1.3 に改訂し、JP2 の設定を確認する手順を追加した（2026-10-01）。\r\n・取扱説明書に「伝送路の両端の機器のみ JP2 をショートする」ことを明記する（2026-10 末まで、担当：技術サポート）。\r\n・ケーブルが 30m を超える場合は 57600bps 以下で使うことを推奨する。\r\n\r\n■ 状態：対策済み（2026-10-08 に効果を確認）\r\n"
+  }
+ ],
+ "questions": [
+  {
+   "id": 1,
+   "type": "表の読み取り",
+   "question": "HZ-LDO33A の出力電流の最大値はいくつですか？",
+   "expected": "500mA。",
+   "must": [
+    [
+     "500"
+    ]
+   ],
+   "sources": [
+    "HZ-LDO33A_データシート.pdf"
+   ]
+  },
+  {
+   "id": 2,
+   "type": "表の読み取り",
+   "question": "HZ-LDO33A の無負荷時消費電流の標準値と最大値を教えてください。",
+   "expected": "標準 35μA、最大 60μA。",
+   "must": [
+    [
+     "35"
+    ],
+    [
+     "60"
+    ]
+   ],
+   "sources": [
+    "HZ-LDO33A_データシート.pdf"
+   ]
+  },
+  {
+   "id": 3,
+   "type": "表の読み取り",
+   "question": "HZ-LDO33A の出力電流 500mA のときのドロップアウト電圧の最大値は？",
+   "expected": "650mV（Rev.1.1 で 600mV から変更）。",
+   "must": [
+    [
+     "650"
+    ]
+   ],
+   "sources": [
+    "HZ-LDO33A_データシート.pdf"
+   ]
+  },
+  {
+   "id": 4,
+   "type": "表の読み取り",
+   "question": "HZ-LDO33A を DFN-6 パッケージで使うときの熱抵抗 θja は？",
+   "expected": "65℃/W（JEDEC 4層基板）。",
+   "must": [
+    [
+     "65"
+    ]
+   ],
+   "sources": [
+    "HZ-LDO33A_データシート.pdf"
+   ]
+  },
+  {
+   "id": 5,
+   "type": "表の読み取り",
+   "question": "HZ-LDO33A の出力コンデンサの ESR はどの範囲にすればよいですか？",
+   "expected": "0.001Ω〜0.5Ω。",
+   "must": [
+    [
+     "0.001"
+    ],
+    [
+     "0.5"
+    ]
+   ],
+   "sources": [
+    "HZ-LDO33A_データシート.pdf"
+   ]
+  },
+  {
+   "id": 6,
+   "type": "表の読み取り",
+   "question": "HZ-LDO33A の過熱保護が働く温度と、そのヒステリシスは？",
+   "expected": "検出温度 160℃（標準）、ヒステリシス 20℃。",
+   "must": [
+    [
+     "160"
+    ],
+    [
+     "20"
+    ]
+   ],
+   "sources": [
+    "HZ-LDO33A_データシート.pdf"
+   ]
+  },
+  {
+   "id": 7,
+   "type": "単一事実",
+   "question": "HZ-LDO33A の EN 端子を使わないときはどう処理しますか？",
+   "expected": "VIN に接続する（開放は禁止）。",
+   "must": [
+    [
+     "VIN"
+    ]
+   ],
+   "sources": [
+    "HZ-LDO33A_データシート.pdf"
+   ]
+  },
+  {
+   "id": 8,
+   "type": "表の読み取り",
+   "question": "HZ-N6030 のゲート電圧 4.5V のときのオン抵抗の最大値は？",
+   "expected": "19mΩ（VGS=4.5V、ID=10A）。",
+   "must": [
+    [
+     "19"
+    ]
+   ],
+   "sources": [
+    "HZ-N6030_MOSFET_データシート.pdf"
+   ]
+  },
+  {
+   "id": 9,
+   "type": "表の読み取り",
+   "question": "HZ-N6030 のゲートしきい値電圧は最小何 V から最大何 V ですか？",
+   "expected": "1.2V〜2.5V（標準 1.8V）。",
+   "must": [
+    [
+     "1.2"
+    ],
+    [
+     "2.5"
+    ]
+   ],
+   "sources": [
+    "HZ-N6030_MOSFET_データシート.pdf"
+   ]
+  },
+  {
+   "id": 10,
+   "type": "表の読み取り",
+   "question": "HZ-N6030 のケース温度 100℃ での連続ドレイン電流の定格は？",
+   "expected": "21A。",
+   "must": [
+    [
+     "21"
+    ]
+   ],
+   "sources": [
+    "HZ-N6030_MOSFET_データシート.pdf"
+   ]
+  },
+  {
+   "id": 11,
+   "type": "表の読み取り",
+   "question": "HZ-N6030 の総ゲート電荷量 Qg の標準値と最大値は？",
+   "expected": "標準 18nC、最大 26nC（Rev.2.0 で 30nC から変更）。",
+   "must": [
+    [
+     "18"
+    ],
+    [
+     "26"
+    ]
+   ],
+   "sources": [
+    "HZ-N6030_MOSFET_データシート.pdf"
+   ]
+  },
+  {
+   "id": 12,
+   "type": "単一事実",
+   "question": "HZ-N6030 のオン抵抗は、チャネル温度 125℃ では 25℃ のときの何倍になりますか？",
+   "expected": "約 1.7 倍。",
+   "must": [
+    [
+     "1.7"
+    ]
+   ],
+   "sources": [
+    "HZ-N6030_MOSFET_データシート.pdf"
+   ]
+  },
+  {
+   "id": 13,
+   "type": "単一事実",
+   "question": "SN-200 の BOM で、温度センサの単価はいくらですか？",
+   "expected": "210 円（HZ-TS20-DRL）。",
+   "must": [
+    [
+     "210"
+    ]
+   ],
+   "sources": [
+    "SN-200_BOM.xlsx"
+   ]
+  },
+  {
+   "id": 14,
+   "type": "英語資料",
+   "question": "HZ-TS20 の ADD0 端子を SDA につないだときの I2C アドレスは？",
+   "expected": "0x4A。",
+   "must": [
+    [
+     "0x4A",
+     "4A"
+    ]
+   ],
+   "sources": [
+    "HZ-TS20_Datasheet.pdf"
+   ]
+  },
+  {
+   "id": 15,
+   "type": "英語資料",
+   "question": "HZ-TS20 の -40℃〜125℃ での温度精度は？",
+   "expected": "±0.5℃（最大）。",
+   "must": [
+    [
+     "0.5"
+    ]
+   ],
+   "sources": [
+    "HZ-TS20_Datasheet.pdf"
+   ]
+  },
+  {
+   "id": 16,
+   "type": "英語資料",
+   "question": "HZ-TS20 の1回の温度変換にかかる時間（標準）は？",
+   "expected": "15.5ms（最大 17.5ms）。",
+   "must": [
+    [
+     "15.5"
+    ]
+   ],
+   "sources": [
+    "HZ-TS20_Datasheet.pdf"
+   ]
+  },
+  {
+   "id": 17,
+   "type": "英語資料",
+   "question": "HZ-TS20 のデバイス ID レジスタのアドレスと、読み出される値は？",
+   "expected": "アドレス 0x0F、値 0x2012。",
+   "must": [
+    [
+     "0x0F",
+     "0F"
+    ],
+    [
+     "2012"
+    ]
+   ],
+   "sources": [
+    "HZ-TS20_Datasheet.pdf"
+   ]
+  },
+  {
+   "id": 18,
+   "type": "英語資料",
+   "question": "HZ-TS20 の温度レジスタの値が 0x0C80 のとき、温度は何度ですか？",
+   "expected": "25.0℃（3200 × 0.0078125）。",
+   "must": [
+    [
+     "25"
+    ]
+   ],
+   "sources": [
+    "HZ-TS20_Datasheet.pdf"
+   ]
+  },
+  {
+   "id": 19,
+   "type": "英語資料",
+   "question": "HZ-TS20 の変換中（動作時）の消費電流の標準値は？",
+   "expected": "135μA（Rev.B で 150μA から変更）。",
+   "must": [
+    [
+     "135"
+    ]
+   ],
+   "sources": [
+    "HZ-TS20_Datasheet.pdf"
+   ]
+  },
+  {
+   "id": 20,
+   "type": "英語資料",
+   "question": "AN-012 では HZ-BK2405 の入力コンデンサに何を勧めていますか？",
+   "expected": "10μF・50V・X7R のセラミックコンデンサを 2 個並列（1210 サイズ）、VIN 端子から 3mm 以内。",
+   "must": [
+    [
+     "10"
+    ],
+    [
+     "50"
+    ],
+    [
+     "X7R"
+    ],
+    [
+     "2個",
+     "2 個",
+     "2つ",
+     "二つ",
+     "並列",
+     "two",
+     "parallel"
+    ]
+   ],
+   "sources": [
+    "AN-012_Input_Capacitor_Selection.pdf"
+   ]
+  },
+  {
+   "id": 21,
+   "type": "英語資料",
+   "question": "AN-012 の例で、入力 12V・出力 5V・2A のときの入力コンデンサのリップル電流（実効値）は？",
+   "expected": "約 0.99A（D=0.417）。",
+   "must": [
+    [
+     "0.99"
+    ]
+   ],
+   "sources": [
+    "AN-012_Input_Capacitor_Selection.pdf"
+   ]
+  },
+  {
+   "id": 22,
+   "type": "英語資料",
+   "question": "ファームウェア v2.3.0 の既知の不具合は何ですか？",
+   "expected": "電源投入後 2 秒間、ADC の校正が終わるまで GET_VOLT が 0 を返す。",
+   "must": [
+    [
+     "GET_VOLT"
+    ],
+    [
+     "2"
+    ]
+   ],
+   "sources": [
+    "SN-200_Firmware_Release_Notes.docx"
+   ]
+  },
+  {
+   "id": 23,
+   "type": "英語の質問",
+   "question": "What is the typical dropout voltage of the HZ-LDO33A at 300 mA?",
+   "expected": "250 mV (typical); 400 mV max.",
+   "must": [
+    [
+     "250"
+    ]
+   ],
+   "sources": [
+    "HZ-LDO33A_データシート.pdf"
+   ]
+  },
+  {
+   "id": 24,
+   "type": "英語の質問",
+   "question": "What is the maximum RS-485 baud rate of the SN-200?",
+   "expected": "115200 bps.",
+   "must": [
+    [
+     "115200"
+    ]
+   ],
+   "sources": [
+    "SN-200_ハードウェア設計仕様書.docx"
+   ]
+  },
+  {
+   "id": 25,
+   "type": "英語の質問",
+   "question": "Which capacitor dielectrics are prohibited on power lines by the internal design guideline?",
+   "expected": "Y5V and Z5U.",
+   "must": [
+    [
+     "Y5V"
+    ],
+    [
+     "Z5U"
+    ]
+   ],
+   "sources": [
+    "コンデンサ選定基準.html"
+   ]
+  },
+  {
+   "id": 26,
+   "type": "英語の質問",
+   "question": "In firmware 2.2.1, what was the default measurement interval changed to?",
+   "expected": "60 seconds (from 30 s).",
+   "must": [
+    [
+     "60"
+    ]
+   ],
+   "sources": [
+    "SN-200_Firmware_Release_Notes.docx"
+   ]
+  },
+  {
+   "id": 27,
+   "type": "言い換え",
+   "question": "SN-200 は何ボルトから何ボルトの電源につなげますか？",
+   "expected": "DC 9V〜24V（逆接続保護あり）。",
+   "must": [
+    [
+     "9"
+    ],
+    [
+     "24"
+    ]
+   ],
+   "sources": [
+    "SN-200_ハードウェア設計仕様書.docx"
+   ]
+  },
+  {
+   "id": 28,
+   "type": "言い換え",
+   "question": "SN-200 の基板の大きさを教えてください。",
+   "expected": "80mm × 50mm、厚さ 1.6mm（4層）。",
+   "must": [
+    [
+     "80"
+    ],
+    [
+     "50"
+    ]
+   ],
+   "sources": [
+    "SN-200_ハードウェア設計仕様書.docx"
+   ]
+  },
+  {
+   "id": 29,
+   "type": "言い換え",
+   "question": "SN-200 で温度センサが LDO の熱で狂わないよう、どれくらい離して置いていますか？",
+   "expected": "LDO（U2）から 14mm（推奨は 10mm 以上）。",
+   "must": [
+    [
+     "14"
+    ]
+   ],
+   "sources": [
+    "SN-200_ハードウェア設計仕様書.docx"
+   ]
+  },
+  {
+   "id": 30,
+   "type": "言い換え",
+   "question": "SN-200 で RS-485 の終端抵抗を有効にするにはどうしますか？",
+   "expected": "ジャンパ JP2 をショートする（伝送路の両端の機器のみ）。",
+   "must": [
+    [
+     "JP2"
+    ]
+   ],
+   "sources": [
+    "SN-200_ハードウェア設計仕様書.docx"
+   ]
+  },
+  {
+   "id": 31,
+   "type": "言い換え",
+   "question": "出荷検査で 3.3V の電圧がいくつならOKですか？",
+   "expected": "3.25V〜3.35V（TP1）。",
+   "must": [
+    [
+     "3.25"
+    ],
+    [
+     "3.35"
+    ]
+   ],
+   "sources": [
+    "SN-200_出荷検査手順書.docx"
+   ]
+  },
+  {
+   "id": 32,
+   "type": "言い換え",
+   "question": "出荷検査で NG になった基板はどうすればよいですか？",
+   "expected": "赤色の不良タグを付けて隔離棚に置き、当日中に品質保証課へ不具合票で報告する。",
+   "must": [
+    [
+     "タグ"
+    ],
+    [
+     "品質保証",
+     "品証"
+    ]
+   ],
+   "sources": [
+    "SN-200_出荷検査手順書.docx"
+   ]
+  },
+  {
+   "id": 33,
+   "type": "言い換え",
+   "question": "測定間隔を 0 秒にするコマンドを送るとどうなりますか？",
+   "expected": "エラー応答（エラーコード 0xE3：パラメータが範囲外）になる。",
+   "must": [
+    [
+     "E3"
+    ]
+   ],
+   "sources": [
+    "UART_コマンド仕様.md"
+   ]
+  },
+  {
+   "id": 34,
+   "type": "言い換え",
+   "question": "温度を読むコマンドの応答が 2534 だったら何℃ですか？",
+   "expected": "25.34℃（0.01℃ 単位）。",
+   "must": [
+    [
+     "25.34"
+    ]
+   ],
+   "sources": [
+    "UART_コマンド仕様.md"
+   ]
+  },
+  {
+   "id": 35,
+   "type": "言い換え",
+   "question": "SN-200 の通信フレームのチェックサムの計算で、初期値はいくつですか？",
+   "expected": "0xFFFF（CRC-16/CCITT、多項式 0x1021）。",
+   "must": [
+    [
+     "FFFF"
+    ]
+   ],
+   "sources": [
+    "UART_コマンド仕様.md"
+   ]
+  },
+  {
+   "id": 36,
+   "type": "言い換え",
+   "question": "アルミ電解コンデンサは、使う温度を 10℃ 下げると寿命はどうなりますか？",
+   "expected": "2 倍になる（10℃2倍則）。",
+   "must": [
+    [
+     "2倍",
+     "2 倍",
+     "二倍"
+    ]
+   ],
+   "sources": [
+    "コンデンサ選定基準.html"
+   ]
+  },
+  {
+   "id": 37,
+   "type": "複数資料",
+   "question": "SN-200 の温度センサの I2C アドレスはいくつで、そのためには ADD0 端子をどこにつなぎますか？",
+   "expected": "0x49。ADD0 を VDD に接続する。",
+   "must": [
+    [
+     "49"
+    ],
+    [
+     "VDD"
+    ]
+   ],
+   "sources": [
+    "SN-200_ハードウェア設計仕様書.docx",
+    "HZ-TS20_Datasheet.pdf"
+   ]
+  },
+  {
+   "id": 38,
+   "type": "複数資料",
+   "question": "SN-200 の LDO の損失は何 W で、SOT-89-5 の熱抵抗だと温度上昇は何℃になりますか？",
+   "expected": "0.255W。θja 104℃/W で約 27℃ 上昇（周囲 70℃ で Tj 約 97℃）。",
+   "must": [
+    [
+     "0.255"
+    ],
+    [
+     "27"
+    ]
+   ],
+   "sources": [
+    "SN-200_ハードウェア設計仕様書.docx",
+    "HZ-LDO33A_データシート.pdf",
+    "SN-200_DR2_設計レビュー.pptx"
+   ]
+  },
+  {
+   "id": 39,
+   "type": "複数資料",
+   "question": "不具合 FR-2026-031 を受けて、出荷検査手順書は何版になり、何が追加されましたか？",
+   "expected": "Rev.1.3。ジャンパ JP2（終端抵抗）の設定を確認する手順が追加された。",
+   "must": [
+    [
+     "1.3"
+    ],
+    [
+     "JP2"
+    ]
+   ],
+   "sources": [
+    "不具合報告_FR-2026-031.txt",
+    "SN-200_出荷検査手順書.docx"
+   ]
+  },
+  {
+   "id": 40,
+   "type": "複数資料",
+   "question": "温度試験で不合格になったのはどの温度・どの試料で、理由は何ですか？",
+   "expected": "70℃ の試料 #2。温度センサ誤差 +0.62℃ が基準（±0.5℃）を超えた。",
+   "must": [
+    [
+     "70"
+    ],
+    [
+     "0.62"
+    ]
+   ],
+   "sources": [
+    "SN-200_温度試験結果.csv",
+    "SN-200_出荷検査手順書.docx"
+   ]
+  },
+  {
+   "id": 41,
+   "type": "複数資料",
+   "question": "SN-200 の量産試作の時期と台数、目標原価は？",
+   "expected": "2026 年 7 月に 50 台。目標原価は 1 台 4,800 円。",
+   "must": [
+    [
+     "7月",
+     "7 月"
+    ],
+    [
+     "50"
+    ],
+    [
+     "4800"
+    ]
+   ],
+   "sources": [
+    "SN-200_DR2_設計レビュー.pptx"
+   ]
+  },
+  {
+   "id": 42,
+   "type": "複数資料",
+   "question": "SN-200 の Q1 の代わりに使える部品と、その条件は？",
+   "expected": "HZ-N6040。VDSS 60V 以上・RDS(on) 15mΩ 以下であれば可。",
+   "must": [
+    [
+     "N6040"
+    ],
+    [
+     "15"
+    ]
+   ],
+   "sources": [
+    "SN-200_BOM.xlsx"
+   ]
+  },
+  {
+   "id": 43,
+   "type": "複数資料",
+   "question": "SN-200 の BOM の主要部品の合計金額はいくらですか？",
+   "expected": "1,594 円（主要部品のみ）。",
+   "must": [
+    [
+     "1594"
+    ]
+   ],
+   "sources": [
+    "SN-200_BOM.xlsx"
+   ]
+  },
+  {
+   "id": 44,
+   "type": "食い違い",
+   "question": "SN-200 の LDO の出力コンデンサ C12 の容量はいくつですか？",
+   "expected": "設計仕様書（Rev.2.1）は 22μF、BOM（版C）は 10μF で食い違っている。BOM では納期の都合で 22μF から 10μF に変更されている。",
+   "must": [
+    [
+     "22"
+    ],
+    [
+     "10"
+    ]
+   ],
+   "sources": [
+    "SN-200_ハードウェア設計仕様書.docx",
+    "SN-200_BOM.xlsx"
+   ]
+  },
+  {
+   "id": 45,
+   "type": "資料にない",
+   "question": "HZ-N6030 のゲート抵抗 Rg はいくつですか？",
+   "expected": "資料に記載なし（「判断できません」と答えれば正解）。",
+   "must": [],
+   "sources": []
+  },
+  {
+   "id": 46,
+   "type": "資料にない",
+   "question": "SN-200 の防水・防塵の等級（IP 等級）は？",
+   "expected": "資料に記載なし（「判断できません」と答えれば正解）。",
+   "must": [],
+   "sources": []
+  },
+  {
+   "id": 47,
+   "type": "資料にない",
+   "question": "HZ-TS20 で湿度を測ったときの精度は？",
+   "expected": "資料に記載なし（HZ-TS20 は温度センサ。「判断できません」と答えれば正解）。",
+   "must": [],
+   "sources": []
+  },
+  {
+   "id": 48,
+   "type": "資料にない",
+   "question": "What is the MTBF of the SN-200?",
+   "expected": "Not in the documents (answering \"cannot be determined\" is correct).",
+   "must": [],
+   "sources": []
+  },
+  {
+   "id": 49,
+   "type": "Excelの表",
+   "question": "代替品 GR-1210-106-50 の DC 24V での静電容量はいくつですか？",
+   "expected": "4.7μF（正規品は 5.8μF）。",
+   "must": [
+    [
+     "4.7"
+    ]
+   ],
+   "sources": [
+    "C3-C4_コンデンサ受入評価.xlsx"
+   ]
+  },
+  {
+   "id": 50,
+   "type": "Excelの表",
+   "question": "代替品 GR-1210-106-50 の ESR（500kHz）はいくつですか？",
+   "expected": "未測定（測定器の手配待ち）。正規品は 3.1mΩ。",
+   "must": [
+    [
+     "未測定"
+    ]
+   ],
+   "sources": [
+    "C3-C4_コンデンサ受入評価.xlsx"
+   ]
+  },
+  {
+   "id": 51,
+   "type": "Excelの表",
+   "question": "正規品 CM32X7R106K50 の DC 24V での容量変化率は？",
+   "expected": "-42.6%（0V 比）。",
+   "must": [
+    [
+     "42.6"
+    ]
+   ],
+   "sources": [
+    "C3-C4_コンデンサ受入評価.xlsx"
+   ]
+  },
+  {
+   "id": 52,
+   "type": "Excelの表",
+   "question": "コンデンサの受入評価で、代替品を評価した日はいつですか？",
+   "expected": "2026 年 9 月 12 日（正規品は 9 月 10 日）。",
+   "must": [
+    [
+     "2026-09-12",
+     "9月12日",
+     "9 月 12 日"
+    ]
+   ],
+   "sources": [
+    "C3-C4_コンデンサ受入評価.xlsx"
+   ]
+  },
+  {
+   "id": 53,
+   "type": "Excelの表",
+   "question": "C3, C4 の代替品の単価と納期は？",
+   "expected": "¥24（1,000 個購入時）、納期 3 週。",
+   "must": [
+    [
+     "24"
+    ],
+    [
+     "3週",
+     "3 週"
+    ]
+   ],
+   "sources": [
+    "C3-C4_コンデンサ受入評価.xlsx"
+   ]
+  },
+  {
+   "id": 54,
+   "type": "Excelの表",
+   "question": "代替品 GR-1210-106-50 を 24V 系で使うときの条件は何ですか？",
+   "expected": "3 個並列にすること（判定は条件付き合格）。",
+   "must": [
+    [
+     "3個",
+     "3 個",
+     "3つ",
+     "三つ"
+    ]
+   ],
+   "sources": [
+    "C3-C4_コンデンサ受入評価.xlsx"
+   ]
+  },
+  {
+   "id": 55,
+   "type": "Excelの表",
+   "question": "SN-200 の BOM で、ターミナルブロック 3P のメーカーと単価は？",
+   "expected": "コハク工業、66 円。",
+   "must": [
+    [
+     "コハク"
+    ],
+    [
+     "66"
+    ]
+   ],
+   "sources": [
+    "SN-200_BOM.xlsx"
+   ]
+  },
+  {
+   "id": 56,
+   "type": "Excelの表",
+   "question": "SN-200 の BOM で、終端抵抗 R10 の型番は？",
+   "expected": "RC16-121J（120Ω）。",
+   "must": [
+    [
+     "RC16-121J"
+    ]
+   ],
+   "sources": [
+    "SN-200_BOM.xlsx"
+   ]
+  },
+  {
+   "id": 57,
+   "type": "資料にない",
+   "question": "代替品 GR-1210-106-50 の 125℃ での容量変化率は？",
+   "expected": "表に値がない（空欄。正規品は -12.8%）。「判断できません」と答えれば正解。",
+   "must": [],
+   "sources": []
+  }
+ ]
+}

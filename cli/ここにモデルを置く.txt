@@ -3,9 +3,10 @@
   models/
     ruri-v3-30m/   … 軽量・日本語特化（名古屋大学）
     bge-m3/        … 高精度・多言語
+    embeddinggemma-2/ … Google・多言語。英語の資料に日本語で質問するときなどに強い（CLI・デスクトップ版のみ。ブラウザ版では動きません）
 
 ■ 入手方法（どちらか）
-1. ネットにつながるPCで  rag.exe models download ruri   （bge-m3 は  rag.exe models download bge）
+1. ネットにつながるPCで  rag.exe models download ruri   （bge-m3 は  rag.exe models download bge 、EmbeddingGemma 2 は  rag.exe models download gemma）
 2. ブラウザ版の配布物にある「埋め込みモデル」フォルダで取得したもの（ruri-v3-30m など）をそのままコピー
 
 モデルがなくても、キーワード検索だけで動きます。

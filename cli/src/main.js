@@ -6,7 +6,25 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { embed, findModel, listModels, modelDirs, exeDir, engine, setRunOptions } from './embed.js';
 import { SITE } from './site_files.js';
+import cmapsFile from '../runtime/cmaps.json' with { type: 'file' };
 const Core = require('./core.cjs');
+
+// PDF の読み込み（pdf.js）。Core.extractText が呼ぶ。処理役（worker）は別スレッドにせずこのプロセスの中で動かし、
+// 日本語などの文字の対応表（CMap）は exe に同梱したものを使う（外部には読みに行かない）。初めて PDF を読むときだけ読み込む。
+let pdfP = null;
+globalThis.RAG_PDF = () => pdfP || (pdfP = (async () => {
+  // pdf.js は読み込み時に「画面描画用の部品（canvas）がない」と警告を出すが、文字の取り出しには不要なので表示しない
+  const log = console.log, warn = console.warn;
+  const quiet = f => (...a) => { if (!/^Warning: Cannot (load "@napi-rs\/canvas"|polyfill)/.test(String(a[0]))) f(...a); };
+  console.log = quiet(log); console.warn = quiet(warn);
+  let pdfjs;
+  try {
+    globalThis.pdfjsWorker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+    pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  } finally { console.log = log; console.warn = warn; }
+  const map = JSON.parse(await Bun.file(cmapsFile).text());
+  return { pdfjs, cmap: n => map[n] ? new Uint8Array(Buffer.from(map[n], 'base64')) : null };
+})());
 
 const VERSION = '1.0.0';
 const DEFAULTS = { index: 'rag-index.json', chunk: 600, overlap: 100, k: 5, n: 10, format: 'qa', temp: 0.1, maxTokens: 2048 };
@@ -183,7 +201,7 @@ const HELP = `RAG プロンプトビルダー CLI ${VERSION}
 
 使い方:
   rag index <資料フォルダ|ファイル...> [-o rag-index.json] [-m ruri-v3-30m] [--no-embed]
-      資料を読み込み、検索用のインデックスを作ります（md, txt, csv, json, html, docx, xlsx, pptx）。
+      資料を読み込み、検索用のインデックスを作ります（md, txt, csv, json, html, pdf, docx, xlsx, pptx）。
       -m で埋め込みモデルを指定するとハイブリッド検索（キーワード＋意味）になります。
       -m を省略すると、使えるモデルがあれば ruri → bge-m3 の順で自動で使います。
   rag search "<質問>" [-i rag-index.json] [-n 10] [--extra "追加キーワード"]
@@ -196,7 +214,8 @@ const HELP = `RAG プロンプトビルダー CLI ${VERSION}
   rag eval <testset.json> [--llm URL] [--llm-model 名前] [-m モデル|--keyword] [-k 5] [--csv 結果.csv]
       テストセットで検索の当たり率を測ります。--llm を付けると回答も採点します（評価ツールと同じCSV形式）。
   rag models                      使える埋め込みモデルの一覧
-  rag models download ruri|bge    埋め込みモデルを HuggingFace からダウンロード（ネット接続が必要。ここだけ通信します）
+  rag models download ruri|bge|gemma   埋め込みモデルを HuggingFace からダウンロード（ネット接続が必要。ここだけ通信します）
+  rag text <資料フォルダ|ファイル...> [--json] [-o 出力]   資料から読み取った文章を表示（PDF などの読み取り結果の確認用）
   rag rules [--base-file F] [--extra-file F]   使われるプロンプトのルール（基本＋追加）を表示
   rag app   [--port 39871]                    画面版（プロンプトビルダー／精度テスト）をアプリとして開く
   rag serve [--port 39871]                    画面とベクトル化API（OpenAI互換 /v1/embeddings）をこのPC内だけで提供
@@ -382,10 +401,11 @@ async function cmdModels(pos, opt) {
     console.log(`  ${m.name.padEnd(20)} ${(size / 1048576).toFixed(0).padStart(5)} MB  ${onnx.join(', ')}  (${m.dir})`);
   }
 }
-const CATALOG = { ruri: { repo: 'sirasagi62/ruri-v3-30m-ONNX', dir: 'ruri-v3-30m' }, bge: { repo: 'Xenova/bge-m3', dir: 'bge-m3' } };
+const CATALOG = { ruri: { repo: 'sirasagi62/ruri-v3-30m-ONNX', dir: 'ruri-v3-30m' }, bge: { repo: 'Xenova/bge-m3', dir: 'bge-m3' },
+  gemma: { repo: 'onnx-community/embeddinggemma-2-ONNX', dir: 'embeddinggemma-2' } };   // gemma は文章用の部品（model_*.onnx）だけを取る
 async function downloadModel(which, opt) {
   const keys = which === 'all' ? Object.keys(CATALOG) : [which];
-  if (!which || keys.some(k => !CATALOG[k])) die('ダウンロードするモデルを指定してください: ruri / bge / all');
+  if (!which || keys.some(k => !CATALOG[k])) die('ダウンロードするモデルを指定してください: ruri / bge / gemma / all');
   const root = path.resolve(opt['models-dir'] || path.join(exeDir(), 'models'));
   const base = ['config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', '1_Pooling/config.json'];
   const pref = ['onnx/model_quantized.onnx', 'onnx/model_int8.onnx', 'onnx/model_uint8.onnx', 'onnx/model.onnx'];
@@ -412,6 +432,14 @@ async function downloadModel(which, opt) {
     }
   }
   console.error('完了しました。社内PCで使うときは、models フォルダを rag.exe と同じ場所にコピーしてください。');
+}
+
+// 資料から取り出した文章を表示する（PDF や Excel がどう読み取られるかの確認用）
+async function cmdText(pos, opt) {
+  if (!pos.length) die('資料のファイルかフォルダを指定してください');
+  const { docs, skipped } = await readDocs(pos);
+  for (const s of skipped) console.error(`読み込めませんでした: ${s}`);
+  writeOut(opt.json ? JSON.stringify(docs, null, 1) + '\n' : docs.map(d => `===== ${d.name} =====\n${d.text.trim()}\n`).join('\n'), opt);
 }
 
 function cmdRules(pos, opt, cfg) {
@@ -480,7 +508,7 @@ async function main() {
   if (cmd === '--version' || cmd === 'version') { console.log(VERSION); return; }
   const cfg = loadConfig(opt);
   setRunOptions({ device: opt.device || cfg.device || 'cpu', threads: num(opt.threads ?? cfg.threads ?? 0, '--threads') });
-  const table = { index: cmdIndex, search: cmdSearch, prompt: cmdPrompt, ask: cmdAsk, eval: cmdEval, models: cmdModels, rules: cmdRules, serve: cmdServe, app: cmdApp };
+  const table = { index: cmdIndex, search: cmdSearch, prompt: cmdPrompt, ask: cmdAsk, eval: cmdEval, models: cmdModels, rules: cmdRules, text: cmdText, serve: cmdServe, app: cmdApp };
   if (!table[cmd]) die(`不明なコマンドです: ${cmd}（rag help で使い方を表示）`);
   await table[cmd](pos, opt, cfg);
 }
