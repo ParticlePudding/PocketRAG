@@ -1,6 +1,8 @@
 # PocketRAG（RAG プロンプトビルダー）
 
 社内ChatGPT（APIなし）などに貼り付ける **RAG プロンプト** を、手元の資料から作るツールです。
+
+**すぐ試す（ブラウザ版）**：https://particlepudding.github.io/PocketRAG/ （精度テストは [eval.html](https://particlepudding.github.io/PocketRAG/eval.html)、テスト用資料は [sample/](https://particlepudding.github.io/PocketRAG/sample/)）
 資料の読み込み・検索（キーワード＋意味のハイブリッド）・ベクトル化はすべてローカルで行い、資料は外部に送信しません。
 
 読み込める資料：PDF・Word（.docx）・Excel（.xlsx）・PowerPoint（.pptx）・テキスト・Markdown・CSV・HTML など。
