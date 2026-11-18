@@ -141,27 +141,12 @@
   const embCache = new Map(); let retNote = '';
 
   /* ---------- 採点 ---------- */
-  const normA = s => String(s || '').normalize('NFKC').toLowerCase().replace(/(\d),(?=\d)/g, '$1').replace(/\s+/g, '');
-  const REFUSE = ['判断できません', '判断できない', '記載がありません', '記載されていません', '記載はありません', '記述がありません', '記述はありません',
-    '見当たりません', '含まれていません', '書かれていません', 'わかりません', '分かりません', '情報がありません', '情報はありません'];
-  const isRefusal = a => REFUSE.some(r => normA(a).includes(normA(r)));
-  const coverage = (text, must) => {
-    const t = normA(text);
-    return must.filter(g => g.some(x => t.includes(normA(x)))).length;
-  };
-  const stripThink = s => String(s || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/^[\s\S]*?<\/think>/, '').trim();
-
-  function autoJudge(q, answer) {
-    const a = stripThink(answer);
-    if (!a.trim()) return null;
-    if (!q.must.length) return isRefusal(a);
-    return coverage(a, q.must) === q.must.length;
-  }
+  // 採点の決まりは Core にある（CLI の rag eval と共通）
+  const { normA, isRefusal, coverage, stripThink, autoJudge } = Core;
 
   /* ---------- 準備 ---------- */
-  // 検索の当たり判定には、本文に加えて文書名・見出しも含める（表のチャンクは本文に主語がないため）
-  const ctxText = cs => cs.map(c => c.source.replace(/\.[^.]+$/, '') + ' ' + (c.heading || '') + '\n' + c.text).join('\n');
-  const retOf = (q, cs) => q.must.length ? coverage(ctxText(cs), q.must) / q.must.length : null;
+  // 検索の当たり判定：根拠の資料（sources）のかたまりに、正解の語がそろったか
+  const retOf = (q, cs) => Core.retrievalScore(q, cs);
 
   async function embedCached(texts) {
     const key = t => cfg.embModel + '|' + t;

@@ -32,6 +32,8 @@ const DEFAULTS = { index: 'rag-index.json', chunk: 600, overlap: 100, k: 5, n: 1
 /* ---------- 引数 ---------- */
 const ALIAS = { o: 'out', i: 'index', k: 'k', n: 'n', m: 'model', h: 'help', f: 'format', c: 'copy', q: 'quiet' };
 const BOOL = new Set(['help', 'json', 'copy', 'quiet', 'no-embed', 'no-extra', 'version', 'keyword', 'gpu', 'no-open', 'print-url']);
+const KNOWN = new Set([...BOOL, 'api-model', 'base-file', 'budget', 'chunk', 'config', 'device', 'extra', 'extra-file', 'format', 'host', 'index', 'instr', 'k', 'n',
+  'llm', 'llm-model', 'max-tokens', 'model', 'models-dir', 'out', 'overlap', 'port', 'temp', 'threads', 'csv', 'json']);
 function parseArgs(argv) {
   const pos = [], opt = {};
   for (let i = 0; i < argv.length; i++) {
@@ -41,6 +43,8 @@ function parseArgs(argv) {
       let key = a.replace(/^--?/, ''), val;
       if (key.includes('=')) [key, val] = [key.slice(0, key.indexOf('=')), key.slice(key.indexOf('=') + 1)];
       key = ALIAS[key] || key;
+      // 知らないオプションは、黙って無視せず知らせる（打ち間違いに気づけるように）
+      if (!KNOWN.has(key)) console.error(`注意: 「${a}」は知らないオプションなので無視します（rag help で一覧を確認できます）`);
       if (val === undefined) val = BOOL.has(key) ? true : argv[++i];
       if (val === undefined) die(`--${key} の値がありません`);
       opt[key] = val;
@@ -103,7 +107,7 @@ async function readDocs(inputs) {
       try {
         const b = fs.readFileSync(f);
         const text = await Core.extractText(path.basename(f), b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
-        if (text && text.trim()) docs.push({ name: rel, text }); else skipped.push(`${rel}（本文なし）`);
+        if (text && text.trim()) docs.push({ name: rel, text, date: fs.statSync(f).mtime.toISOString().slice(0, 10) }); else skipped.push(`${rel}（本文なし）`);
       } catch (e) { skipped.push(`${rel}（${e.message}）`); }
     }
   }
@@ -185,14 +189,9 @@ async function chat(url, model, p, { temp, maxTokens }) {
 }
 
 /* ---------- 採点（評価ツールと同じ規則） ---------- */
-const normA = s => String(s || '').normalize('NFKC').toLowerCase().replace(/(\d),(?=\d)/g, '$1').replace(/\s+/g, '');
-const REFUSE = ['判断できません', '判断できない', '記載がありません', '記載されていません', '記載はありません', '記述がありません', '記述はありません',
-  '見当たりません', '含まれていません', '書かれていません', 'わかりません', '分かりません', '情報がありません', '情報はありません'];
-const isRefusal = a => REFUSE.some(r => normA(a).includes(normA(r)));
-const coverage = (text, must) => { const t = normA(text); return must.filter(g => g.some(x => t.includes(normA(x)))).length; };
-const autoJudge = (q, a) => !a.trim() ? null : !q.must.length ? isRefusal(a) : coverage(a, q.must) === q.must.length;
-const ctxText = cs => cs.map(c => c.source.replace(/\.[^.]+$/, '') + ' ' + (c.heading || '') + '\n' + c.text).join('\n');
-const retOf = (q, cs) => q.must.length ? coverage(ctxText(cs), q.must) / q.must.length : null;
+// 採点の決まりは Core にある（精度テストの画面と共通）。検索の当たりは、根拠の資料（sources）のかたまりだけで判定する
+const { isRefusal, autoJudge } = Core;
+const retOf = (q, cs) => Core.retrievalScore(q, cs);
 const retLabel = r => r === null ? '' : r === 1 ? 'OK' : r > 0 ? 'PARTIAL' : 'NG';
 
 /* =================== コマンド =================== */
@@ -204,7 +203,7 @@ const HELP = `RAG プロンプトビルダー CLI ${VERSION}
       資料を読み込み、検索用のインデックスを作ります（md, txt, csv, json, html, pdf, docx, xlsx, pptx）。
       -m で埋め込みモデルを指定するとハイブリッド検索（キーワード＋意味）になります。
       -m を省略すると、使えるモデルがあれば ruri → bge-m3 の順で自動で使います。
-  rag search "<質問>" [-i rag-index.json] [-n 10] [--extra "追加キーワード"]
+  rag search "<質問>" [-i rag-index.json] [-n 10] [--extra "追加キーワード"] [--json] [-o 出力]
       検索結果（候補）を一覧表示します。
   rag prompt "<質問>" [-i rag-index.json] [-k 5] [-f qa|summary|extract|compare] [--instr "300字以内で"]
                       [--json] [-o prompt.txt] [-c]
@@ -239,14 +238,18 @@ async function cmdIndex(pos, opt, cfg) {
   const { docs, skipped } = await readDocs(pos);
   if (!docs.length) die('読み込める資料がありませんでした');
   const chunks = [];
-  for (const d of docs) for (const c of Core.chunkText(d.text, chunk, overlap)) chunks.push({ source: d.name, heading: c.heading, text: c.text });
+  for (const d of docs) for (const c of Core.chunkText(d.text, chunk, overlap, { date: d.date })) chunks.push({ source: d.name, heading: c.heading, text: c.text });
   log(`資料 ${docs.length} 件 → チャンク ${chunks.length} 個`);
   if (skipped.length) log(`読み込まなかったファイル ${skipped.length} 件:\n  ` + skipped.slice(0, 20).join('\n  ') + (skipped.length > 20 ? '\n  …' : ''));
   let model = null, vectors = null;
-  if (!opt['no-embed']) {
+  if (!opt['no-embed'] && !opt.keyword) {
     const want = opt.model || cfg.model;
-    if (want) model = findModel(want, opt['models-dir']);
-    else {
+    if (opt.model) model = findModel(want, opt['models-dir']);
+    else if (want) {
+      // 設定ファイル（rag.config.json）のモデルが無いときは止めずに、キーワード検索だけで続ける（配布直後はモデルが無いため）
+      try { model = findModel(want, opt['models-dir']); }
+      catch { log(`埋め込みモデル「${want}」（設定ファイルで指定）が見つからないため、キーワード検索だけのインデックスを作ります。\n  モデルを入れるには「rag models download ruri」。models フォルダの「ここにモデルを置く.txt」も参照してください`); }
+    } else {
       const all = listModels(opt['models-dir']);
       model = all.find(m => /ruri/i.test(m.name)) || all.find(m => /bge-m3/i.test(m.name)) || all[0] || null;
       if (!model) log('埋め込みモデルが見つからないため、キーワード検索だけのインデックスを作ります（rag models を参照）');
@@ -397,7 +400,8 @@ async function cmdModels(pos, opt) {
   if (!ms.length) { console.log('埋め込みモデルが見つかりません。「rag models download ruri」でダウンロードするか、models フォルダにモデルのフォルダを置いてください。'); return; }
   for (const m of ms) {
     const onnx = fs.readdirSync(path.join(m.dir, 'onnx')).filter(f => f.endsWith('.onnx'));
-    const size = onnx.reduce((s, f) => s + fs.statSync(path.join(m.dir, 'onnx', f)).size, 0);
+    // 本体が別ファイル（model.onnx_data）に分かれているモデルもあるので、onnx フォルダの中身をすべて数える
+    const size = fs.readdirSync(path.join(m.dir, 'onnx')).reduce((s, f) => s + fs.statSync(path.join(m.dir, 'onnx', f)).size, 0);
     console.log(`  ${m.name.padEnd(20)} ${(size / 1048576).toFixed(0).padStart(5)} MB  ${onnx.join(', ')}  (${m.dir})`);
   }
 }
@@ -450,12 +454,20 @@ function cmdRules(pos, opt, cfg) {
 /* ---------- 画面版とAPI（このPC内だけ） ---------- */
 const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', wasm: 'application/wasm',
   json: 'application/json; charset=utf-8', md: 'text/markdown; charset=utf-8', txt: 'text/plain; charset=utf-8' };
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Private-Network': 'true' };
+// 呼び出してよいのは、この PC の中の画面だけ（同じサーバーの画面、file:// で開いたオフライン版、localhost の画面）。
+// ほかの Web サイトからの呼び出しは断る（ブラウザで開いた外部サイトに、この PC の計算をさせないため）
+const isLocalOrigin = o => !o || o === 'null' || /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(o);
+const corsFor = req => {
+  const o = req.headers.get('origin');
+  return o ? { 'Access-Control-Allow-Origin': o, 'Vary': 'Origin', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' } : {};
+};
 function startServer(opt) {
   const port = num(opt.port ?? 39871, '--port'), host = opt.host || '127.0.0.1';
   const appTag = `<script>window.RAG_APP = { embedUrl: location.origin + '/v1', offline: true, engine: ${JSON.stringify(engine().kind)} };</script>\n`;
   const server = Bun.serve({ port, hostname: host, async fetch(req) {
     const u = new URL(req.url);
+    if (!isLocalOrigin(req.headers.get('origin'))) return new Response('このサーバーは、この PC の中の画面からだけ使えます', { status: 403 });
+    const CORS = corsFor(req);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     try {
       if (u.pathname === '/v1/models') return Response.json({ object: 'list', data: listModels(opt['models-dir']).map(m => ({ id: m.name, object: 'model', owned_by: 'local' })) }, { headers: CORS });
