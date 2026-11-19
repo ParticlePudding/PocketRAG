@@ -468,12 +468,13 @@ const Core = (() => {
     '見当たりません', '含まれていません', '書かれていません', 'わかりません', '分かりません', '情報がありません', '情報はありません'];
   const stripThink = s => String(s || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/^[\s\S]*?<\/think>/, '').trim();
   const isRefusal = a => REFUSE.some(r => normA(a).includes(normA(r)));
-  // 正解の語が含まれているか。数字だけの語（12、0.5 など）は、前後に数字が続かないときだけ一致（12 が 120 や 2012 に当たらないように）
+  // 正解の語が含まれているか。数字だけの語（12、0.5 など）は、文章の中の数値と比べる：
+  //  同じ値（23.3 と 23.30）、または整数部分（669 と 669.26）なら一致。12 が 120 や 2012 に当たることはない
   function hasWord(t, x) {
-    const w = normA(x);
+    const w = normA(x).replace(/^[-+]/, '');
     if (!w) return false;
-    if (!/^[-+]?[\d.]+$/.test(w)) return t.includes(w);
-    return new RegExp('(?<![\\d.])' + w.replace(/[.+]/g, '\\$&') + '(?!\\d|\\.\\d)').test(t);
+    if (!/^\d+(\.\d+)?$/.test(w)) return t.includes(normA(x));
+    return (t.match(/\d+(?:\.\d+)?/g) || []).some(n => n === w || +n === +w || (!w.includes('.') && n.startsWith(w + '.')));
   }
   const coverage = (text, must) => { const t = normA(text); return must.filter(g => g.some(x => hasWord(t, x))).length; };
   // 回答の自動判定。答えの最初の文が「判断できません」などなら、正解の語が含まれていても不正解（言い訳の中に数字が出てくる誤判定を防ぐ）
@@ -499,7 +500,8 @@ const Core = (() => {
   // （下位まで数えると、キーワードが1語でも当たったものが、キーワードの当たらない意味検索の1位より上に来てしまうため）
   //  mode='max'（既定）… 2つの点の大きい方で並べる（どちらかの検索が上位に挙げたものを残す）。同点は合計で決める。
   //    合計（'sum'）だと、英語の資料に日本語で聞いたときなど、キーワードが当たらない正解が下に落ちる（評価者20人のテストセットで確認）
-  function hybridSearch(index, query, extra, topN, qVec, vecs, { k = 60, wKw = 1, wVec = 1, cap = 0, mode = 'max' } = {}) {
+  //  perSource … 同じ資料から上位に入るかたまりの数の上限（超えた分は後ろに回す。0 なら上限なし）
+  function hybridSearch(index, query, extra, topN, qVec, vecs, { k = 60, wKw = 1, wVec = 1, cap = 0, mode = 'max', perSource = 0 } = {}) {
     const fused = new Map();
     const add = (i, v, info) => {
       const o = fused.get(i) || { i, score: 0, sum: 0, best: 0 };
@@ -513,7 +515,13 @@ const Core = (() => {
         .sort((a, b) => b.s - a.s)
         .forEach((r, rank) => add(r.i, cap && rank >= cap ? 0 : wVec / (k + rank + 1), { vecRank: rank + 1, vecScore: r.s }));
     }
-    return [...fused.values()].sort((a, b) => b.score - a.score).slice(0, topN);
+    let res = [...fused.values()].sort((a, b) => b.score - a.score);
+    if (perSource > 0) {
+      const n = new Map(), keep = [], later = [];
+      for (const r of res) { const s = index.docs[r.i].title; n.set(s, (n.get(s) || 0) + 1); (n.get(s) <= perSource ? keep : later).push(r); }
+      res = keep.concat(later);
+    }
+    return res.slice(0, topN);
   }
 
   // 検索語に当たった文字位置（ハイライト用）
@@ -851,6 +859,17 @@ const Core = (() => {
     return out.join('\n');
   }
 
+  // Markdown：| で書いた表を、Excel・Word と同じタブ区切りの行にする（区切りの行 |---|---| は除く。コードブロックの中は変えない）
+  function mdText(s) {
+    let code = false;
+    return s.replace(/\r\n?/g, '\n').split('\n').map(l => {
+      if (/^\s*(```|~~~)/.test(l)) { code = !code; return l; }
+      if (code || !/^\s*\|.*\|\s*$/.test(l)) return l;
+      if (/^\s*\|(\s*:?-{2,}:?\s*\|)+\s*$/.test(l)) return null;
+      return l.trim().replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map(c => c.trim().replace(/\\\|/g, '|').replace(/\t/g, ' ')).join('\t');
+    }).filter(l => l !== null).join('\n');
+  }
+
   // CSV・TSV：引用符（"…"）の中のカンマや改行を正しく扱い、Excel と同じタブ区切りの行にする
   function csvText(s, delim) {
     const rows = []; let row = [], cell = '', q = false;
@@ -1092,6 +1111,7 @@ const Core = (() => {
     if (ext === 'xlsx' || ext === 'xlsm') return xlsxText(buf);
     if (ext === 'html' || ext === 'htm') return htmlText(decodeText(buf));
     if (ext === 'csv' || ext === 'tsv') return csvText(decodeText(buf), ext === 'csv' ? ',' : '\t');
+    if (ext === 'md' || ext === 'markdown') return mdText(decodeText(buf));
     if (TEXT_EXT.includes(ext)) return decodeText(buf);
     if (ext === 'pdf') return pdfText(buf);
     if (['doc', 'xls', 'ppt'].includes(ext)) throw new Error('古いOffice形式です（.docx/.xlsx/.pptxで保存し直してください）');

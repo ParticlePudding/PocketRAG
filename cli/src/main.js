@@ -31,9 +31,9 @@ const DEFAULTS = { index: 'rag-index.json', chunk: 600, overlap: 100, k: 5, n: 1
 
 /* ---------- 引数 ---------- */
 const ALIAS = { o: 'out', i: 'index', k: 'k', n: 'n', m: 'model', h: 'help', f: 'format', c: 'copy', q: 'quiet' };
-const BOOL = new Set(['help', 'json', 'copy', 'quiet', 'no-embed', 'no-extra', 'version', 'keyword', 'gpu', 'no-open', 'print-url']);
+const BOOL = new Set(['print', 'help', 'json', 'copy', 'quiet', 'no-embed', 'no-extra', 'version', 'keyword', 'gpu', 'no-open', 'print-url']);
 const KNOWN = new Set([...BOOL, 'api-model', 'base-file', 'budget', 'chunk', 'config', 'device', 'extra', 'extra-file', 'format', 'host', 'index', 'instr', 'k', 'n',
-  'llm', 'llm-model', 'max-tokens', 'model', 'models-dir', 'out', 'overlap', 'port', 'temp', 'threads', 'csv', 'json']);
+  'llm', 'llm-model', 'max-tokens', 'model', 'models-dir', 'exclude', 'per-doc', 'out', 'overlap', 'port', 'temp', 'threads', 'csv', 'json']);
 function parseArgs(argv) {
   const pos = [], opt = {};
   for (let i = 0; i < argv.length; i++) {
@@ -97,13 +97,21 @@ function walk(p, out = []) {
   }
   return out;
 }
-async function readDocs(inputs) {
+// --exclude "旧版/**,*.bak" のような除外の指定（カンマ区切り。** は何階層でも、* はフォルダ名・ファイル名の一部）
+function excludeTest(spec) {
+  const pats = String(spec || '').split(',').map(s => s.trim()).filter(Boolean).map(g => new RegExp('^(?:.*/)?' +
+    g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?/g, '\u0001').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0001/g, '.*') + '(?:/.*)?$', 'i'));
+  return rel => pats.some(re => re.test(rel));
+}
+async function readDocs(inputs, exclude) {
   const docs = [], skipped = [];
+  const excluded = excludeTest(exclude); let nEx = 0;
   for (const inp of inputs) {
     if (!fs.existsSync(inp)) die(`見つかりません: ${inp}`);
     const root = fs.statSync(inp).isDirectory() ? inp : path.dirname(inp);
     for (const f of walk(inp)) {
       const rel = path.relative(root, f).split(path.sep).join('/');
+      if (excluded(rel)) { nEx++; continue; }
       try {
         const b = fs.readFileSync(f);
         const text = await Core.extractText(path.basename(f), b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
@@ -111,6 +119,7 @@ async function readDocs(inputs) {
       } catch (e) { skipped.push(`${rel}（${e.message}）`); }
     }
   }
+  if (nEx) log(`除外したファイル ${nEx} 件（--exclude の指定）`);
   return { docs, skipped };
 }
 
@@ -125,10 +134,13 @@ function fromB64(dim, b64) {
   const out = []; for (let i = 0; i < all.length; i += dim) out.push(all.slice(i, i + dim));
   return out;
 }
+const indexCache = new Map();   // rag shell で続けて質問するとき、毎回読み直さないため
 function loadIndex(p) {
+  if (indexCache.has(p)) return indexCache.get(p);
   if (!fs.existsSync(p)) die(`インデックスが見つかりません: ${p}\n  先に「rag index <資料フォルダ>」で作ってください。`);
   const j = JSON.parse(fs.readFileSync(p, 'utf8'));
   const idx = { ...j, kw: Core.buildIndex(j.chunks), vecs: j.vectors ? fromB64(j.vectors.dim, j.vectors.data) : null };
+  indexCache.set(p, idx);
   return idx;
 }
 async function embedChunks(chunks, model, label = 'ベクトル化') {
@@ -146,7 +158,7 @@ async function retrieve(idx, question, extra, topN, opt) {
   const model = findModel(idx.model, opt['models-dir']);
   const q = Core.embedPrefixes(model.name).q + question + (extra ? ' ' + extra : '');
   const { vectors } = await embed(model, [q]);
-  return { hits: Core.hybridSearch(idx.kw, question, extra, topN, vectors[0], idx.vecs), mode: `ハイブリッド（${model.name}）` };
+  return { hits: Core.hybridSearch(idx.kw, question, extra, topN, vectors[0], idx.vecs, { perSource: +(opt['per-doc'] || 0) }), mode: `ハイブリッド（${model.name}）` };
 }
 
 /* ---------- 出力 ---------- */
@@ -174,7 +186,12 @@ async function llmModelOf(url, name) {
   if (!r.ok) die(`ローカルLLMの一覧を取得できません（HTTP ${r.status}）`);
   const ids = ((await r.json()).data || []).map(m => m.id).filter(id => !Core.isEmbedModel(id));
   if (!ids.length) die('回答用のモデルが読み込まれていません（--llm-model で指定してください）');
-  return ids[0];
+  // 考える過程を長く出すモデル（reasoning・think・r1 など）は遅く、答えの形もそろいにくいので後回しにする
+  const slow = id => /reason|think|(^|[-_/])r1([-_]|$)|qwq/i.test(id);
+  const pick = ids.find(id => !slow(id)) || ids[0];
+  // どのモデルで答えたかを必ず表示する（以前、一覧の先頭の思考型モデルが知らないうちに使われ、結果が下がった）
+  console.error(`回答に使うモデル: ${pick}` + (ids.length > 1 ? `（ほかに ${ids.filter(i => i !== pick).join('、')}。--llm-model で変えられます）` : ''));
+  return pick;
 }
 async function chat(url, model, p, { temp, maxTokens }) {
   const t0 = Date.now();
@@ -199,7 +216,7 @@ const HELP = `RAG プロンプトビルダー CLI ${VERSION}
 資料を検索して、社内ChatGPTなどに貼り付けるプロンプトを作ります。処理はすべてこのPCの中で行います。
 
 使い方:
-  rag index <資料フォルダ|ファイル...> [-o rag-index.json] [-m ruri-v3-30m] [--no-embed]
+  rag index <資料フォルダ|ファイル...> [-o rag-index.json] [-m ruri-v3-30m] [--no-embed] [--exclude "旧版/**,*_old.*"]
       資料を読み込み、検索用のインデックスを作ります（md, txt, csv, json, html, pdf, docx, xlsx, pptx）。
       -m で埋め込みモデルを指定するとハイブリッド検索（キーワード＋意味）になります。
       -m を省略すると、使えるモデルがあれば ruri → bge-m3 の順で自動で使います。
@@ -214,6 +231,7 @@ const HELP = `RAG プロンプトビルダー CLI ${VERSION}
       テストセットで検索の当たり率を測ります。--llm を付けると回答も採点します（評価ツールと同じCSV形式）。
   rag models                      使える埋め込みモデルの一覧
   rag models download ruri|bge|gemma   埋め込みモデルを HuggingFace からダウンロード（ネット接続が必要。ここだけ通信します）
+  rag shell [-i rag-index.json] [-k 5] [--print]   続けて質問できるモード（モデルを読み込んだままなので2問目から速い。プロンプトはクリップボードへ）
   rag text <資料フォルダ|ファイル...> [--json] [-o 出力]   資料から読み取った文章を表示（PDF などの読み取り結果の確認用）
   rag rules [--base-file F] [--extra-file F]   使われるプロンプトのルール（基本＋追加）を表示
   rag app   [--port 39871]                    画面版（プロンプトビルダー／精度テスト）をアプリとして開く
@@ -223,6 +241,7 @@ const HELP = `RAG プロンプトビルダー CLI ${VERSION}
   --models-dir DIR      埋め込みモデルの置き場所（既定: exe と同じ場所の models / 埋め込みモデル）
   --base-file F         基本プロンプトをファイルから読む       --extra-file F   追加プロンプトをファイルから読む
   --no-extra            追加プロンプトを使わない                --config F       設定ファイル（既定: rag.config.json）
+  --per-doc N         1つの資料から上位に入れるかたまりを N 件までにする（問い合わせ履歴のような大きな資料が上位を占めるとき）
   --device cpu|dml      ベクトル化に使う装置（dml は Windows の GPU。既定は cpu）  --threads N  CPUのスレッド数
   -q, --quiet           進み具合を表示しない
 
@@ -235,7 +254,7 @@ async function cmdIndex(pos, opt, cfg) {
   if (!pos.length) die('資料のフォルダかファイルを指定してください（例: rag index ./社内資料）');
   const chunk = num(get(opt, cfg, 'chunk', DEFAULTS.chunk), '--chunk'), overlap = num(get(opt, cfg, 'overlap', DEFAULTS.overlap), '--overlap');
   const out = opt.out || cfg.index || DEFAULTS.index;
-  const { docs, skipped } = await readDocs(pos);
+  const { docs, skipped } = await readDocs(pos, opt.exclude || cfg.exclude);
   if (!docs.length) die('読み込める資料がありませんでした');
   const chunks = [];
   for (const d of docs) for (const c of Core.chunkText(d.text, chunk, overlap, { date: d.date })) chunks.push({ source: d.name, heading: c.heading, text: c.text });
@@ -290,6 +309,38 @@ async function buildPromptFor(question, opt, cfg) {
   log(`検索方式: ${mode}　参考資料 ${p.used} 件${p.dropped ? `（上限文字数のため ${p.dropped} 件省略）` : ''}・${p.full.length.toLocaleString()} 文字`);
   return p;
 }
+// 続けて質問できるモード。埋め込みモデルとインデックスを読み込んだままにするので、2問目からは速い
+async function cmdShell(pos, opt, cfg) {
+  const readline = await import('readline');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr, terminal: !!process.stdin.isTTY });
+  console.error('続けて質問できるモードです。質問を入力して Enter を押すと、プロンプトを作ってクリップボードにコピーします。');
+  console.error('  /s 質問 … 検索結果だけを表示　　/k 3 … プロンプトに入れる資料の件数を変える　　/q … 終わる');
+  let k = num(get(opt, cfg, 'k', DEFAULTS.k), '-k');
+  // 入力された行を順に処理する（貼り付けやファイルから流し込んだ複数行も、1行ずつ順番に）
+  const queue = []; let wake = null, closed = false;
+  rl.on('line', l => { queue.push(l); if (wake) { wake(); wake = null; } });
+  rl.on('close', () => { closed = true; if (wake) { wake(); wake = null; } });
+  rl.setPrompt('質問> ');
+  const ask = () => { if (!closed) rl.prompt(); };
+  ask();
+  for (;;) {
+    if (!queue.length) { if (closed) break; await new Promise(r => { wake = r; }); continue; }
+    const s = queue.shift().trim();
+    if (/^\/(q|quit|exit)$/i.test(s)) break;
+    try {
+      if (/^\/k\s+\d+$/i.test(s)) { k = +s.split(/\s+/)[1]; console.error(`資料の件数を ${k} 件にしました`); }
+      else if (/^\/s\s+/i.test(s)) await cmdSearch([s.replace(/^\/s\s+/i, '')], { ...opt, n: opt.n || 5, copy: false, out: undefined }, cfg);
+      else if (s) {
+        const p = await buildPromptFor(s, { ...opt, k }, cfg);
+        if (opt.print) process.stdout.write(p.full + '\n');
+        copyToClipboard(p.full);
+      }
+    } catch (e) { console.error('エラー: ' + e.message); }
+    ask();
+  }
+  rl.close();
+}
+
 async function cmdPrompt(pos, opt, cfg) {
   const question = pos.join(' ').trim(); if (!question) die('質問を指定してください');
   const p = await buildPromptFor(question, opt, cfg);
@@ -439,9 +490,9 @@ async function downloadModel(which, opt) {
 }
 
 // 資料から取り出した文章を表示する（PDF や Excel がどう読み取られるかの確認用）
-async function cmdText(pos, opt) {
+async function cmdText(pos, opt, cfg = {}) {
   if (!pos.length) die('資料のファイルかフォルダを指定してください');
-  const { docs, skipped } = await readDocs(pos);
+  const { docs, skipped } = await readDocs(pos, opt.exclude || cfg.exclude);
   for (const s of skipped) console.error(`読み込めませんでした: ${s}`);
   writeOut(opt.json ? JSON.stringify(docs, null, 1) + '\n' : docs.map(d => `===== ${d.name} =====\n${d.text.trim()}\n`).join('\n'), opt);
 }
@@ -520,7 +571,7 @@ async function main() {
   if (cmd === '--version' || cmd === 'version') { console.log(VERSION); return; }
   const cfg = loadConfig(opt);
   setRunOptions({ device: opt.device || cfg.device || 'cpu', threads: num(opt.threads ?? cfg.threads ?? 0, '--threads') });
-  const table = { index: cmdIndex, search: cmdSearch, prompt: cmdPrompt, ask: cmdAsk, eval: cmdEval, models: cmdModels, rules: cmdRules, text: cmdText, serve: cmdServe, app: cmdApp };
+  const table = { index: cmdIndex, search: cmdSearch, prompt: cmdPrompt, ask: cmdAsk, eval: cmdEval, models: cmdModels, rules: cmdRules, text: cmdText, shell: cmdShell, serve: cmdServe, app: cmdApp };
   if (!table[cmd]) die(`不明なコマンドです: ${cmd}（rag help で使い方を表示）`);
   await table[cmd](pos, opt, cfg);
 }
