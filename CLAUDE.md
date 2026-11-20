@@ -123,8 +123,8 @@ Windows で Python を使うときは `PYTHONUTF8=1` を付ける（日本語の
 
 ## 次にやること
 1. （済）GitHub に push、Pages を公開（https://particlepudding.github.io/PocketRAG/）。リポジトリは Public。
-2. **利用者に頼む**：Actions の「Release」を手動実行し、GitHub の Windows 環境でもビルドが通るか確認（ローカルの Windows では通っている。
-   Claude の内蔵ブラウザは GitHub にログインしていないので実行できない。タグ v* を push しても動くが、その場合は公開の Release が作られる）。
+2. （済）Actions の「Release」を手動実行し、GitHub の Windows 環境でもビルドが通ることを確認（2026-11-19、コミット fd4fbf9。
+   配布物は1つの zip「rag-prompt-builder-windows」にまとめてアップロードされる）。
 3. （済）Windows 実機で `rag.exe models / index / app` と、デスクトップ版の起動・終了を確認。
 4. （済）CLI とブラウザ版のベクトルの一致：ruri はコサイン 0.999 以上。bge-m3 は 0.985〜0.988（q8 の計算がネイティブ版とブラウザ版で少し違うため）。技術文書57問で、1位の一致 52/57、上位5件の重なり 90.9%（2026-11-19）。
    ほぼ同じだが完全には一致しないので、CLI とブラウザ版で結果を比べるときは ruri を使う。
