@@ -259,6 +259,10 @@ const Core = (() => {
 
   // 見出し（# ）で区切り、段落・文の切れ目を優先して指定文字数のチャンクにまとめる。
   function chunkText(text, size = 600, overlap = 100, opts = {}) {   // opts.date：ファイルの更新日（YYYY-MM-DD）
+    // 大きさが 0 や負の数だと分割が終わらなくなるので、ここで必ず確かめる（画面・CLI・精度テストの共通の入口）
+    size = Math.floor(Number(size)); overlap = Math.floor(Number(overlap) || 0);
+    if (!Number.isFinite(size) || size < 1) throw new Error('チャンクの文字数は 1 以上の整数にしてください: ' + size);
+    overlap = Math.min(Math.max(0, overlap), size - 1);
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
     const paras = []; let heading = ''; let cur = [];
     const pushPara = () => { if (cur.length) { paras.push({ heading, text: cur.join('\n') }); cur = []; } };
@@ -445,12 +449,13 @@ const Core = (() => {
   function cosine(a, b) { let s = 0; const n = Math.min(a.length, b.length); for (let i = 0; i < n; i++) s += a[i] * b[i]; return s; }
 
   // LM Studio（OpenAI互換）の /v1/embeddings を呼ぶ
-  async function embed(baseUrl, model, texts, { batch = 16, signal, onProgress } = {}) {
+  // token：rag serve（デスクトップ版）が起動ごとに作る合言葉。ほかのサイトから計算を使われないため（window.RAG_APP.token）
+  async function embed(baseUrl, model, texts, { batch = 16, signal, onProgress, token } = {}) {
     const url = baseUrl.replace(/\/+$/, '') + '/embeddings';
     const out = [];
     for (let i = 0; i < texts.length; i += batch) {
       const part = texts.slice(i, i + batch);
-      const r = await fetch(url, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input: part }) });
+      const r = await fetch(url, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify({ model, input: part }) });
       if (!r.ok) throw new Error('埋め込みの取得に失敗しました（HTTP ' + r.status + '）' + (await r.text()).slice(0, 120));
       const j = await r.json();
       const data = (j.data || []).slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
@@ -1104,6 +1109,16 @@ const Core = (() => {
   }
 
   const TEXT_EXT = ['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'conf', 'text'];
+  // 読み込む前に、形式と大きさで読めるかを決める（大きな動画や zip を丸ごとメモリに読み込まないため）。読めないときは理由を返す
+  const DOC_EXT = ['docx', 'pptx', 'xlsx', 'xlsm', 'html', 'htm', 'pdf', ...TEXT_EXT];
+  const MAX_FILE_MB = 200;
+  function fileProblem(name, size) {
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    if (['doc', 'xls', 'ppt'].includes(ext)) return '古いOffice形式です（.docx/.xlsx/.pptxで保存し直してください）';
+    if (!DOC_EXT.includes(ext)) return '未対応の形式です';
+    if (size > MAX_FILE_MB * 1048576) return `大きすぎます（${(size / 1048576).toFixed(0)} MB。${MAX_FILE_MB} MB まで）`;
+    return null;
+  }
   async function extractText(name, buf) {
     const ext = (name.split('.').pop() || '').toLowerCase();
     if (ext === 'docx') return docxText(buf);
@@ -1182,7 +1197,7 @@ const Core = (() => {
 
   const parseNumbers = s => [...norm(s).matchAll(/\d+/g)].map(m => +m[0]);
 
-  return { tokenize, chunkText, buildIndex, search, setSearchOptions, hybridSearch, normA, isRefusal, stripThink, coverage, autoJudge, retrievalScore, embed, embedPrefixes, chunkEmbedText, isEmbedModel, cosine, matchMask, extractText, decodeText, buildPrompt, buildExpandPrompt, buildRerankPrompt, parseNumbers, DEFAULT_BASE, DEFAULT_EXTRA, loadPromptRules, savePromptRules };
+  return { tokenize, chunkText, buildIndex, search, setSearchOptions, hybridSearch, normA, isRefusal, stripThink, coverage, autoJudge, retrievalScore, embed, embedPrefixes, chunkEmbedText, isEmbedModel, cosine, matchMask, extractText, fileProblem, decodeText, buildPrompt, buildExpandPrompt, buildRerankPrompt, parseNumbers, DEFAULT_BASE, DEFAULT_EXTRA, loadPromptRules, savePromptRules };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
 </script>
@@ -1195,6 +1210,8 @@ if (typeof module !== 'undefined') module.exports = Core;
     searchMode: 'kw', embEngine: window.RAG_APP ? 'app' : 'browser', appModel: '', webModel: '', webDevice: 'auto', lmUrl: 'http://localhost:1234/v1', embModel: '' };
   let settings = { ...DEFAULTS };
   try { Object.assign(settings, JSON.parse(localStorage.getItem('ragpb-settings') || '{}')); } catch {}
+  if (!(settings.chunk >= 200 && settings.chunk <= 4000)) settings.chunk = DEFAULTS.chunk;   // 保存された値が壊れていても分割が終わるように
+  if (!(settings.overlap >= 0 && settings.overlap < settings.chunk)) settings.overlap = Math.min(DEFAULTS.overlap, settings.chunk - 1);
   const saveSettings = () => { try { localStorage.setItem('ragpb-settings', JSON.stringify(settings)); } catch {} };
 
   let docs = [];      // {name, text, chunks:[{heading,text}]}
@@ -1251,7 +1268,7 @@ if (typeof module !== 'undefined') module.exports = Core;
   const embId = () => isApp() ? 'app:' + settings.appModel : isWeb() ? 'web:' + settings.webModel : settings.embModel;
   const embKey = c => embId() + '|' + Core.chunkEmbedText(c);
   function embedTexts(texts, onProgress) {
-    if (isApp()) return Core.embed(window.RAG_APP.embedUrl, settings.appModel, texts, { onProgress });
+    if (isApp()) return Core.embed(window.RAG_APP.embedUrl, settings.appModel, texts, { onProgress, token: window.RAG_APP.token });
     return isWeb()
       ? BrowserEmbed.embed(settings.webModel, texts, { device: settings.webDevice, onProgress,
           onDownload: (f, d, t) => { $('embStatus').textContent = `モデルをダウンロード中（初回のみ）… ${f.split('/').pop()} ${fmtMB(d)} / ${fmtMB(t)}`; } })
@@ -1315,7 +1332,7 @@ if (typeof module !== 'undefined') module.exports = Core;
   async function refreshAppModels() {
     if (!window.RAG_APP) return;
     try {
-      const ids = ((await (await fetch(window.RAG_APP.embedUrl + '/models')).json()).data || []).map(m => m.id);
+      const ids = ((await (await fetch(window.RAG_APP.embedUrl + '/models', { headers: { Authorization: 'Bearer ' + window.RAG_APP.token } })).json()).data || []).map(m => m.id);
       $('setAppModel').innerHTML = ids.length ? ids.map(id => `<option value="${esc(id)}"${id === settings.appModel ? ' selected' : ''}>${esc(BrowserEmbed.label(id, true))}</option>`).join('') : '<option value="">（モデルがありません）</option>';
       if (!ids.includes(settings.appModel)) { settings.appModel = ids.find(n => /ruri/i.test(n)) || ids[0] || ''; saveSettings(); $('setAppModel').value = settings.appModel; }
       $('appInfo').textContent = window.RAG_APP.engine === 'native' ? 'ネイティブ版エンジンで計算します（高速）' : 'WASM版エンジン（予備）で計算します';
@@ -1367,6 +1384,8 @@ if (typeof module !== 'undefined') module.exports = Core;
     for (const [n, f] of files.entries()) {
       const name = f._path || f.webkitRelativePath || f.name;
       $('loadLog').textContent = `読み込み中… ${n + 1}/${files.length}  ${name}`;
+      const bad = Core.fileProblem(name, f.size);
+      if (bad) { log.push(`${name}: ${bad}`); continue; }
       try {
         const text = await Core.extractText(name, await f.arrayBuffer());
         const date = f.lastModified ? new Date(f.lastModified).toISOString().slice(0, 10) : '';
@@ -1423,7 +1442,10 @@ if (typeof module !== 'undefined') module.exports = Core;
     const el = $(id);
     if (el.type === 'checkbox') el.checked = settings[key]; else el.value = settings[key];
     el.addEventListener('change', () => {
-      settings[key] = el.type === 'checkbox' ? el.checked : (num ? Math.max(0, +el.value || DEFAULTS[key]) : el.value);
+      // 数値は入力欄の min〜max の範囲に収める（チャンクの文字数が 0 や負の数になると分割が終わらないため）
+      const clamp = v => Math.min(el.max !== '' ? +el.max : Infinity, Math.max(el.min !== '' ? +el.min : 0, Math.round(v)));
+      settings[key] = el.type === 'checkbox' ? el.checked : (num ? clamp(+el.value || DEFAULTS[key]) : el.value);
+      if (num) el.value = settings[key];
       saveSettings(); after && after();
     });
   };

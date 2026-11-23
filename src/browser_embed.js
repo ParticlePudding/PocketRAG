@@ -42,7 +42,7 @@ const BrowserEmbed = (() => {
   const pipes = new Map();    // 'モデル|device' → Promise<{pipe, device, dtype, pooling}>
   const alias = new Map();    // 'm0' → モデル名（モデルIDに日本語などが来ても安全にするため）
   let lastRun = '';
-  let onDownload = null;      // ダウンロードの進み具合を受け取る関数
+  const dlListeners = new Set();   // ダウンロードの進み具合を受け取る関数（同時に動く呼び出しごとに 1 つ。互いに消し合わないように）
 
   /* ---- 計算エンジン ---- */
   const rtCache = new Map();
@@ -181,7 +181,7 @@ const BrowserEmbed = (() => {
       for (;;) {
         const { done, value } = await reader.read(); if (done) break;
         parts.push(value); got += value.length;
-        onDownload && onDownload(path, got, total);
+        for (const fn of dlListeners) fn(path, got, total);
       }
       blob = new Blob(parts);
     } else blob = await r.blob();
@@ -308,7 +308,8 @@ const BrowserEmbed = (() => {
 
   /* texts をベクトル化（正規化済み Float32Array の配列） */
   async function embed(name, texts, opts = {}) {
-    onDownload = opts.onDownload || null;
+    const fn = opts.onDownload ? (...a) => opts.onDownload(...a) : null;   // 同じ関数が 2 回渡されても別々に登録する
+    if (fn) dlListeners.add(fn);
     try { return await embedOnce(name, texts, opts); }
     catch (err) {
       // GPU（WebGPU）の計算で失敗したときは CPU でやり直す（GPUドライバや fp16 非対応など）
@@ -317,7 +318,7 @@ const BrowserEmbed = (() => {
         return embedOnce(name, texts, { ...opts, device: 'wasm' });
       }
       throw err;
-    } finally { onDownload = null; }
+    } finally { if (fn) dlListeners.delete(fn); }
   }
   async function embedOnce(name, texts, { device = 'auto', batch = 8, onProgress, signal } = {}) {
     const P = await getPipe(name, device);

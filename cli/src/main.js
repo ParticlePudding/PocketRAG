@@ -4,6 +4,9 @@
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
+import { createHash } from 'crypto';
+import { Readable, Transform } from 'stream';
+import { pipeline } from 'stream/promises';
 import { embed, findModel, listModels, modelDirs, exeDir, engine, setRunOptions } from './embed.js';
 import { SITE } from './site_files.js';
 import cmapsFile from '../runtime/cmaps.json' with { type: 'file' };
@@ -33,7 +36,7 @@ const DEFAULTS = { index: 'rag-index.json', chunk: 600, overlap: 100, k: 5, n: 1
 const ALIAS = { o: 'out', i: 'index', k: 'k', n: 'n', m: 'model', h: 'help', f: 'format', c: 'copy', q: 'quiet' };
 const BOOL = new Set(['print', 'help', 'json', 'copy', 'quiet', 'no-embed', 'no-extra', 'version', 'keyword', 'gpu', 'no-open', 'print-url']);
 const KNOWN = new Set([...BOOL, 'api-model', 'base-file', 'budget', 'chunk', 'config', 'device', 'extra', 'extra-file', 'format', 'host', 'index', 'instr', 'k', 'n',
-  'llm', 'llm-model', 'max-tokens', 'model', 'models-dir', 'exclude', 'per-doc', 'out', 'overlap', 'port', 'temp', 'threads', 'csv', 'json']);
+  'llm', 'llm-model', 'llm-timeout', 'max-tokens', 'model', 'models-dir', 'exclude', 'per-doc', 'out', 'overlap', 'port', 'temp', 'threads', 'csv', 'json']);
 function parseArgs(argv) {
   const pos = [], opt = {};
   for (let i = 0; i < argv.length; i++) {
@@ -71,6 +74,13 @@ function loadConfig(opt) {
 // 優先順位：コマンドの引数 > 設定ファイル > 既定値
 const get = (opt, cfg, key, def) => opt[key] ?? cfg[key] ?? def;
 const num = (v, name) => { const n = Number(v); if (!Number.isFinite(n)) die(`${name} は数値で指定してください: ${v}`); return n; };
+// チャンクの文字数と重なり。0 や負の数だと分割が終わらなくなるので、整数で範囲内か確かめる
+function chunkOpts(opt, cfg) {
+  const chunk = num(get(opt, cfg, 'chunk', DEFAULTS.chunk), '--chunk'), overlap = num(get(opt, cfg, 'overlap', DEFAULTS.overlap), '--overlap');
+  if (!Number.isInteger(chunk) || chunk < 50) die(`--chunk は 50 以上の整数で指定してください: ${chunk}`);
+  if (!Number.isInteger(overlap) || overlap < 0 || overlap >= chunk) die(`--overlap は 0 以上、--chunk（${chunk}）より小さい整数で指定してください: ${overlap}`);
+  return { chunk, overlap };
+}
 
 function promptRules(opt, cfg) {
   const read = p => fs.readFileSync(p, 'utf8').replace(/^﻿/, '');
@@ -106,12 +116,19 @@ function excludeTest(spec) {
 async function readDocs(inputs, exclude) {
   const docs = [], skipped = [];
   const excluded = excludeTest(exclude); let nEx = 0;
+  const used = new Set();
   for (const inp of inputs) {
     if (!fs.existsSync(inp)) die(`見つかりません: ${inp}`);
     const root = fs.statSync(inp).isDirectory() ? inp : path.dirname(inp);
+    // 複数のフォルダを指定したときは、資料名の頭にフォルダ名を付ける（製品A/仕様書.pdf と 製品B/仕様書.pdf を区別するため）
+    const prefix = inputs.length > 1 ? path.basename(path.resolve(root)) + '/' : '';
     for (const f of walk(inp)) {
-      const rel = path.relative(root, f).split(path.sep).join('/');
+      let rel = prefix + path.relative(root, f).split(path.sep).join('/');
+      if (used.has(rel)) { let n = 2; while (used.has(`${rel}（${n}）`)) n++; rel = `${rel}（${n}）`; }   // それでも同じ名前になるときは番号を付ける
       if (excluded(rel)) { nEx++; continue; }
+      const bad = Core.fileProblem(path.basename(f), fs.statSync(f).size);
+      if (bad) { skipped.push(`${rel}（${bad}）`); continue; }
+      used.add(rel);
       try {
         const b = fs.readFileSync(f);
         const text = await Core.extractText(path.basename(f), b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
@@ -138,7 +155,17 @@ const indexCache = new Map();   // rag shell で続けて質問するとき、�
 function loadIndex(p) {
   if (indexCache.has(p)) return indexCache.get(p);
   if (!fs.existsSync(p)) die(`インデックスが見つかりません: ${p}\n  先に「rag index <資料フォルダ>」で作ってください。`);
-  const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+  let j; try { j = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { die(`インデックスを読めません（壊れているか、別のファイルです）: ${p}
+  ${e.message}`); }
+  // 形を確かめる（ベクトルの数や次元が合わないと、検索の途中でおかしな結果やエラーになるため）
+  const bad = m => die(`インデックスの形が正しくありません: ${p}（${m}）
+  「rag index」で作り直してください。`);
+  if (!j || !Array.isArray(j.chunks) || j.chunks.some(c => !c || typeof c.text !== 'string')) bad('chunks がありません');
+  if (j.vectors) {
+    const { dim, data } = j.vectors;
+    if (!Number.isInteger(dim) || dim < 1 || typeof data !== 'string') bad('vectors の dim か data が正しくありません');
+    if (Buffer.from(data, 'base64').byteLength !== j.chunks.length * dim * 4) bad(`ベクトルの数がチャンクの数（${j.chunks.length}）と合いません`);
+  }
   const idx = { ...j, kw: Core.buildIndex(j.chunks), vecs: j.vectors ? fromB64(j.vectors.dim, j.vectors.data) : null };
   indexCache.set(p, idx);
   return idx;
@@ -193,10 +220,11 @@ async function llmModelOf(url, name) {
   console.error(`回答に使うモデル: ${pick}` + (ids.length > 1 ? `（ほかに ${ids.filter(i => i !== pick).join('、')}。--llm-model で変えられます）` : ''));
   return pick;
 }
-async function chat(url, model, p, { temp, maxTokens }) {
+async function chat(url, model, p, { temp, maxTokens, timeout = 600 }) {
   const t0 = Date.now();
+  // ローカル LLM が止まったときに、いつまでも待たない（既定 600 秒。--llm-timeout で変えられる）
   const r = await fetch(url.replace(/\/+$/, '') + '/chat/completions', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(timeout * 1000),
     body: JSON.stringify({ model, temperature: temp, max_tokens: maxTokens, stream: false,
       messages: [{ role: 'system', content: p.system }, { role: 'user', content: p.user }] })
   });
@@ -236,6 +264,7 @@ const HELP = `RAG プロンプトビルダー CLI ${VERSION}
   rag rules [--base-file F] [--extra-file F]   使われるプロンプトのルール（基本＋追加）を表示
   rag app   [--port 39871]                    画面版（プロンプトビルダー／精度テスト）をアプリとして開く
   rag serve [--port 39871]                    画面とベクトル化API（OpenAI互換 /v1/embeddings）をこのPC内だけで提供
+      API を画面以外から呼ぶときは、起動時に作られる合言葉が必要です（この PC の curl などは不要）。
 
 共通のオプション:
   --models-dir DIR      埋め込みモデルの置き場所（既定: exe と同じ場所の models / 埋め込みモデル）
@@ -243,6 +272,7 @@ const HELP = `RAG プロンプトビルダー CLI ${VERSION}
   --no-extra            追加プロンプトを使わない                --config F       設定ファイル（既定: rag.config.json）
   --per-doc N         1つの資料から上位に入れるかたまりを N 件までにする（問い合わせ履歴のような大きな資料が上位を占めるとき）
   --device cpu|dml      ベクトル化に使う装置（dml は Windows の GPU。既定は cpu）  --threads N  CPUのスレッド数
+  --llm-timeout 秒      ローカルLLMの返事を待つ上限（既定 600 秒）
   -q, --quiet           進み具合を表示しない
 
 設定ファイル rag.config.json（任意。カレントフォルダか exe と同じ場所）の例:
@@ -252,7 +282,7 @@ const HELP = `RAG プロンプトビルダー CLI ${VERSION}
 
 async function cmdIndex(pos, opt, cfg) {
   if (!pos.length) die('資料のフォルダかファイルを指定してください（例: rag index ./社内資料）');
-  const chunk = num(get(opt, cfg, 'chunk', DEFAULTS.chunk), '--chunk'), overlap = num(get(opt, cfg, 'overlap', DEFAULTS.overlap), '--overlap');
+  const { chunk, overlap } = chunkOpts(opt, cfg);
   const out = opt.out || cfg.index || DEFAULTS.index;
   const { docs, skipped } = await readDocs(pos, opt.exclude || cfg.exclude);
   if (!docs.length) die('読み込める資料がありませんでした');
@@ -353,7 +383,7 @@ async function cmdAsk(pos, opt, cfg) {
   const p = await buildPromptFor(question, opt, cfg);
   const model = await llmModelOf(url, opt['llm-model'] || cfg.llmModel);
   log(`回答中…（${model}）`);
-  const r = await chat(url, model, p, { temp: num(get(opt, cfg, 'temp', DEFAULTS.temp), '--temp'), maxTokens: num(get(opt, cfg, 'max-tokens', DEFAULTS.maxTokens), '--max-tokens') });
+  const r = await chat(url, model, p, { temp: num(get(opt, cfg, 'temp', DEFAULTS.temp), '--temp'), maxTokens: num(get(opt, cfg, 'max-tokens', DEFAULTS.maxTokens), '--max-tokens'), timeout: num(get(opt, cfg, 'llm-timeout', 600), '--llm-timeout') });
   log(`（${r.sec.toFixed(1)} 秒）`);
   writeOut(r.answer, opt);
 }
@@ -362,8 +392,9 @@ async function cmdEval(pos, opt, cfg) {
   const file = pos[0]; if (!file) die('テストセット（testset.json）を指定してください');
   const set = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, ''));
   if (!Array.isArray(set.docs) || !Array.isArray(set.questions)) die('テストセットの形式が正しくありません（docs と questions が必要です）');
+  if (!set.questions.length) die('テストセットに質問がありません');
   set.questions.forEach((q, i) => { q.id ??= i + 1; q.type ??= '未分類'; q.must ??= []; q.expected ??= ''; });
-  const chunkSize = num(get(opt, cfg, 'chunk', DEFAULTS.chunk), '--chunk'), overlap = num(get(opt, cfg, 'overlap', DEFAULTS.overlap), '--overlap');
+  const { chunk: chunkSize, overlap } = chunkOpts(opt, cfg);
   const k = num(get(opt, cfg, 'k', DEFAULTS.k), '-k');
   const flat = [];
   for (const d of set.docs) for (const c of Core.chunkText(d.text, chunkSize, overlap)) flat.push({ source: d.name, heading: c.heading, text: c.text });
@@ -402,7 +433,7 @@ async function cmdEval(pos, opt, cfg) {
       const s = state[i];
       progress(`回答中 ${i + 1} / ${state.length}（${llmModel}）`);
       const p = Core.buildPrompt({ question: s.q.question, chunks: s.chunks, format: 'qa', base: rules.base, extra: rules.extra });
-      try { const r = await chat(url, llmModel, p, { temp, maxTokens }); s.answer = r.answer; s.sec = r.sec; }
+      try { const r = await chat(url, llmModel, p, { temp, maxTokens, timeout: num(get(opt, cfg, 'llm-timeout', 600), '--llm-timeout') }); s.answer = r.answer; s.sec = r.sec; }
       catch (e) { s.err = e.message; }
     }
     progress('');
@@ -467,9 +498,13 @@ async function downloadModel(which, opt) {
   for (const k of keys) {
     const { repo, dir } = CATALOG[k];
     console.error(`== ${dir}（${repo}）→ ${path.join(root, dir)}`);
-    const r = await fetch(`https://huggingface.co/api/models/${repo}`).catch(e => die(`HuggingFace に接続できません: ${e.message}`));
+    // blobs=true で、大きいファイルの SHA-256 も受け取る（ダウンロードしたファイルが壊れていないか・すり替わっていないかを確かめるため）
+    const r = await fetch(`https://huggingface.co/api/models/${repo}?blobs=true`).catch(e => die(`HuggingFace に接続できません: ${e.message}`));
     if (!r.ok) die(`モデル情報を取得できません（HTTP ${r.status}）`);
-    const names = ((await r.json()).siblings || []).map(s => s.rfilename);
+    const info = await r.json();
+    const sib = new Map((info.siblings || []).map(s => [s.rfilename, s]));
+    const names = [...sib.keys()];
+    const rev = /^[0-9a-f]{40}$/.test(info.sha || '') ? info.sha : 'main';   // 一覧を取った時点の版に固定する（途中で更新されても混ざらない）
     const files = base.filter(f => names.includes(f));
     const onnx = pref.find(f => names.includes(f)); if (!onnx) die('ONNXファイルが見つかりません');
     files.push(onnx, ...names.filter(n => n.startsWith(onnx + '_data')));
@@ -477,12 +512,23 @@ async function downloadModel(which, opt) {
       const dest = path.join(root, dir, ...f.split('/'));
       if (fs.existsSync(dest)) { console.error(`  （取得済み）${f}`); continue; }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      const res = await fetch(`https://huggingface.co/${repo}/resolve/main/${f}`);
-      if (!res.ok) die(`ダウンロードに失敗しました: ${f}（HTTP ${res.status}）`);
+      const res = await fetch(`https://huggingface.co/${repo}/resolve/${rev}/${f}`);
+      if (!res.ok || !res.body) die(`ダウンロードに失敗しました: ${f}（HTTP ${res.status}）`);
       const total = +res.headers.get('content-length') || 0; let got = 0;
-      const tmp = dest + '.part', w = fs.createWriteStream(tmp);
-      for await (const chunk of res.body) { w.write(chunk); got += chunk.length; if (total > 2e6) progress(`  ${f} ${(got / 1048576).toFixed(0)} / ${(total / 1048576).toFixed(0)} MB`); }
-      await new Promise(ok => w.end(ok)); fs.renameSync(tmp, dest); progress('');
+      const tmp = dest + '.part', hash = createHash('sha256');
+      // pipeline：書き込みが追いつかないときは受信を待たせ（メモリにためない）、途中のエラーも確実に受け取る
+      const count = new Transform({ transform(c, _e, cb) {
+        got += c.length; hash.update(c);
+        if (total > 2e6) progress(`  ${f} ${(got / 1048576).toFixed(0)} / ${(total / 1048576).toFixed(0)} MB`);
+        cb(null, c);
+      } });
+      try {
+        await pipeline(Readable.fromWeb(res.body), count, fs.createWriteStream(tmp));
+        const want = sib.get(f)?.lfs?.sha256, size = sib.get(f)?.lfs?.size ?? sib.get(f)?.size;
+        if (size != null && got !== size) throw new Error(`大きさが合いません（${got} / ${size} バイト）`);
+        if (want && hash.digest('hex') !== want) throw new Error('SHA-256 が合いません（ファイルが壊れているか、別のものです）');
+      } catch (e) { fs.rmSync(tmp, { force: true }); progress(''); die(`ダウンロードに失敗しました: ${f}（${e.message}）`); }
+      fs.renameSync(tmp, dest); progress('');
       console.error(`  取得しました: ${f}`);
     }
   }
@@ -508,28 +554,49 @@ const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=u
 // 呼び出してよいのは、この PC の中の画面だけ（同じサーバーの画面、file:// で開いたオフライン版、localhost の画面）。
 // ほかの Web サイトからの呼び出しは断る（ブラウザで開いた外部サイトに、この PC の計算をさせないため）
 const isLocalOrigin = o => !o || o === 'null' || /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(o);
-const corsFor = req => {
-  const o = req.headers.get('origin');
-  return o ? { 'Access-Control-Allow-Origin': o, 'Vary': 'Origin', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' } : {};
-};
+const LOOPBACK_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+const isLoopbackIP = a => !!a && (a === '::1' || /^(::ffff:)?127\./.test(a));
+// 計算の API（/v1/…）は、起動ごとに作る合言葉（トークン）を知っている呼び出しだけ受け付ける。
+// 「Origin: null」は file:// だけでなく、外部サイトの sandbox の iframe からも送れるため、Origin だけでは防げない。
+// 合言葉はこのサーバーが返す画面（window.RAG_APP.token）にだけ入れる
+const MAX_INPUTS = 256, MAX_INPUT_CHARS = 20000, MAX_BODY = 32 * 1024 * 1024;
 function startServer(opt) {
   const port = num(opt.port ?? 39871, '--port'), host = opt.host || '127.0.0.1';
-  const appTag = `<script>window.RAG_APP = { embedUrl: location.origin + '/v1', offline: true, engine: ${JSON.stringify(engine().kind)} };</script>\n`;
-  const server = Bun.serve({ port, hostname: host, async fetch(req) {
+  const loopbackOnly = LOOPBACK_NAMES.has(host);
+  const token = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString('hex');
+  const hasToken = (req, u) => ((req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '') || u.searchParams.get('token') || '') === token;
+  const appTag = `<script>window.RAG_APP = { embedUrl: location.origin + '/v1', offline: true, engine: ${JSON.stringify(engine().kind)}, token: ${JSON.stringify(token)} };</script>\n`;
+  const deny = (msg, status = 403) => new Response(msg, { status, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+  const server = Bun.serve({ port, hostname: host, maxRequestBodySize: MAX_BODY, async fetch(req, srv) {
     const u = new URL(req.url);
-    if (!isLocalOrigin(req.headers.get('origin'))) return new Response('このサーバーは、この PC の中の画面からだけ使えます', { status: 403 });
-    const CORS = corsFor(req);
-    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+    const origin = req.headers.get('origin');
+    if (!isLocalOrigin(origin)) return deny('このサーバーは、この PC の中の画面からだけ使えます');
+    // DNS リバインディング対策：127.0.0.1 で待ち受けているときは、宛先の名前（Host）も 127.0.0.1・localhost だけにする
+    if (loopbackOnly && !LOOPBACK_NAMES.has(u.hostname.toLowerCase())) return deny('宛先の名前が正しくありません');
+    const fromThisPC = isLoopbackIP(srv.requestIP(req)?.address);
+    const api = u.pathname.startsWith('/v1/');
+    // 計算の API の CORS は、この PC の画面（file:// の null・localhost）にだけ返す。画面（HTML）には CORS を付けない（合言葉を読まれないため）
+    const CORS = api && origin ? { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' } : {};
+    if (req.method === 'OPTIONS') return new Response(null, { status: api ? 204 : 405, headers: CORS });
     try {
-      if (u.pathname === '/v1/models') return Response.json({ object: 'list', data: listModels(opt['models-dir']).map(m => ({ id: m.name, object: 'model', owned_by: 'local' })) }, { headers: CORS });
-      if (u.pathname === '/v1/embeddings' && req.method === 'POST') {
-        const j = await req.json();
-        const input = Array.isArray(j.input) ? j.input : [j.input];
-        const m = findModel(String(j.model || '').replace(/^(app|web):/, ''), opt['models-dir']);
-        const r = await embed(m, input.map(String));
-        return Response.json({ object: 'list', model: m.name, data: r.vectors.map((v, i) => ({ object: 'embedding', index: i, embedding: Array.from(v) })),
-          usage: { prompt_tokens: 0, total_tokens: 0 } }, { headers: { ...CORS, 'X-Rag-Engine': `${r.device}/${r.dtype}` } });
+      if (api) {
+        // 合言葉が無くてもよいのは、この PC で動くブラウザ以外のプログラム（curl など。Origin を付けない）だけ
+        if (!hasToken(req, u) && !(fromThisPC && !origin)) return new Response('合言葉（トークン）がありません', { status: 401, headers: CORS });
+        if (u.pathname === '/v1/models') return Response.json({ object: 'list', data: listModels(opt['models-dir']).map(m => ({ id: m.name, object: 'model', owned_by: 'local' })) }, { headers: CORS });
+        if (u.pathname === '/v1/embeddings' && req.method === 'POST') {
+          const j = await req.json();
+          const input = Array.isArray(j.input) ? j.input : [j.input];
+          if (input.length > MAX_INPUTS) return Response.json({ error: { message: `一度に送れる文章は ${MAX_INPUTS} 件までです` } }, { status: 413, headers: CORS });
+          if (input.some(t => String(t).length > MAX_INPUT_CHARS)) return Response.json({ error: { message: `1 件の文章は ${MAX_INPUT_CHARS} 文字までです` } }, { status: 413, headers: CORS });
+          const m = findModel(String(j.model || '').replace(/^(app|web):/, ''), opt['models-dir']);
+          const r = await embed(m, input.map(String));
+          return Response.json({ object: 'list', model: m.name, data: r.vectors.map((v, i) => ({ object: 'embedding', index: i, embedding: Array.from(v) })),
+            usage: { prompt_tokens: 0, total_tokens: 0 } }, { headers: { ...CORS, 'X-Rag-Engine': `${r.device}/${r.dtype}` } });
+        }
+        return new Response('Not Found', { status: 404, headers: CORS });
       }
+      // 画面には合言葉が入っているので、ほかの PC からは、表示されたアドレス（?token=… 付き）で開いたときだけ返す（--host 0.0.0.0 のとき）
+      if (!fromThisPC && !hasToken(req, u)) return deny('ほかの PC からは、起動したときに表示されたアドレス（token 付き）で開いてください');
       let p = decodeURIComponent(u.pathname.replace(/\/$/, '/index.html')).replace(/^\//, '');
       if (p === 'sample' || p === 'sample/') p = 'sample/index.html';
       const f = SITE[p];
@@ -537,7 +604,7 @@ function startServer(opt) {
       const ext = p.split('.').pop();
       if (ext === 'html') {
         const html = (await Bun.file(f).text()).replace('<script id="bembed">', appTag + '<script id="bembed">');
-        return new Response(html, { headers: { 'Content-Type': MIME.html, 'Cache-Control': 'no-store' } });
+        return new Response(html, { headers: { 'Content-Type': MIME.html, 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer' } });
       }
       return new Response(Bun.file(f), { headers: { 'Content-Type': MIME[ext] || 'application/octet-stream' } });
     } catch (e) { return Response.json({ error: { message: e.message } }, { status: 500, headers: CORS }); }
@@ -545,6 +612,7 @@ function startServer(opt) {
   const url = `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${server.port}/`;
   const E = engine();
   console.error(`RAG プロンプトビルダーを起動しました: ${url}`);
+  if (!loopbackOnly) console.error(`  注意: ${host} で待ち受けています。ほかの PC からは次のアドレスで開けます（token を知っている人だけ使えます）:\n    http://<この PC の IP アドレス>:${server.port}/?token=${token}`);
   console.error(`  計算エンジン: ${E.kind === 'native' ? 'ネイティブ版' : 'WASM版（予備）… ' + E.note}`);
   console.error(`  埋め込みモデル: ${listModels(opt['models-dir']).map(m => m.name).join(', ') || '（なし）'}`);
   console.error('  このウィンドウを閉じると終了します。');

@@ -141,8 +141,12 @@ function unit(v) {
 const pipes = new Map();
 let runOpts = { device: 'auto', threads: 0 };
 export function setRunOptions(o) { runOpts = { ...runOpts, ...o }; }
-async function getPipe(m) {
-  if (pipes.has(m.dir)) return pipes.get(m.dir);
+// 同じモデルを同時に呼んでも 1 回だけ読み込むように、読み込み中の Promise を覚えておく（失敗したら忘れて次に再挑戦）
+function getPipe(m) {
+  if (!pipes.has(m.dir)) { const p = loadPipe(m); pipes.set(m.dir, p); p.catch(() => pipes.delete(m.dir)); }
+  return pipes.get(m.dir);
+}
+async function loadPipe(m) {
   const E = engine();
   // 計算に使う装置：ネイティブ版は CPU（既定）か DirectML（Windows の GPU）。WASM 版は wasm のみ
   const devices = E.kind === 'wasm' ? ['wasm'] : runOpts.device === 'dml' ? ['dml', 'cpu'] : ['cpu'];
@@ -158,8 +162,7 @@ async function getPipe(m) {
       if (device !== 'wasm' && runOpts.threads > 0) opts.session_options = { intraOpNumThreads: runOpts.threads };
       if (fs.existsSync(path.join(m.dir, 'onnx', `model${suf}.onnx_data`))) opts.use_external_data_format = true;
       const pipe = await loadExtractor(L, 'local/' + id, opts);
-      const P = { pipe, dtype, device, pooling: poolingOf(m) };
-      pipes.set(m.dir, P); return P;
+      return { pipe, dtype, device, pooling: poolingOf(m) };
     } catch (e) { lastErr = e; }
   }
   throw lastErr;

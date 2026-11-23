@@ -95,6 +95,8 @@ Windows で Python を使うときは `PYTHONUTF8=1` を付ける（日本語の
    Python の here-doc で `` `
 ` を書くと制御文字になりやすい（使い方.txt の「.ag.exe」が「.ag.exe」に化けた原因）。
 9. `rag serve` は、この PC の中の画面（同じ origin・file:// の null・localhost）からの呼び出しだけを受け付ける。外部サイトの Origin には 403。
+   さらに `/v1/…` は起動ごとの合言葉（`window.RAG_APP.token` を `Authorization: Bearer` で送る）が必要（Origin: null は外部サイトの sandbox iframe からも送れるため）。
+   例外は Origin の無い、この PC からの呼び出し（curl など）だけ。Host が 127.0.0.1・localhost 以外なら 403（DNS リバインディング対策）。画面（HTML）には CORS を付けない。
 
 ## 今の状態
 - 動作確認済み（Linux・ヘッドレス Chrome + Playwright、ダミーモデル／同じ計算量の代用モデル）：

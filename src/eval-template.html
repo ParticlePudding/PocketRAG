@@ -154,7 +154,7 @@
     if (missing.length) {
       const onProgress = (d, t) => { $('progress').textContent = `ベクトル化中… ${d} / ${t}`; };
       const out = cfg.embModel.startsWith('app:')
-        ? await Core.embed(window.RAG_APP.embedUrl, cfg.embModel.slice(4), missing, { onProgress })
+        ? await Core.embed(window.RAG_APP.embedUrl, cfg.embModel.slice(4), missing, { onProgress, token: window.RAG_APP.token })
         : cfg.embModel.startsWith('web:')
         ? await BrowserEmbed.embed(cfg.embModel.slice(4), missing, { device: cfg.webDevice, onProgress,
             onDownload: (f, d, t) => { $('progress').textContent = `モデルをダウンロード中（初回のみ）… ${f.split('/').pop()} ${(d / 1048576).toFixed(0)} / ${(t / 1048576).toFixed(0)} MB`; } })
@@ -344,7 +344,7 @@
   async function renderEmbModels() {
     await BrowserEmbed.load().catch(() => {});
     if (window.RAG_APP && appEmbs === null) {
-      try { appEmbs = ((await (await fetch(window.RAG_APP.embedUrl + '/models')).json()).data || []).map(m => 'app:' + m.id); } catch { appEmbs = []; }
+      try { appEmbs = ((await (await fetch(window.RAG_APP.embedUrl + '/models', { headers: { Authorization: 'Bearer ' + window.RAG_APP.token } })).json()).data || []).map(m => 'app:' + m.id); } catch { appEmbs = []; }
     }
     const app = appEmbs || [];
     const wm = BrowserEmbed.info().models, web = wm.map(m => 'web:' + m.name);
